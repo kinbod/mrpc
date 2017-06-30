@@ -3,12 +3,15 @@ package com.kongzhong.mrpc.server.service;
 import com.kongzhong.mrpc.annotation.RpcService;
 import com.kongzhong.mrpc.demo.exception.BizException;
 import com.kongzhong.mrpc.demo.model.Person;
+import com.kongzhong.mrpc.demo.model.Result;
 import com.kongzhong.mrpc.demo.model.StatusEnum;
 import com.kongzhong.mrpc.demo.service.UserService;
 
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author biezhi
@@ -28,6 +31,10 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public String hello(String name) {
+        try {
+            TimeUnit.MILLISECONDS.sleep(new Random().nextInt(30));
+        } catch (InterruptedException e) {
+        }
         return "Hello, " + name;
     }
 
@@ -64,7 +71,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void testBizExp() {
+    public void testBizExp(Integer num) throws BizException {
         throw new BizException("xx对象不能为空");
     }
 
@@ -82,5 +89,17 @@ public class UserServiceImpl implements UserService {
     @Override
     public List<Person> getPersons() {
         return null;
+    }
+
+    @Override
+    public void setPersons(List<Person> persons) {
+        System.out.println(persons);
+    }
+
+    @Override
+    public Result<Person> getResult() {
+        Result<Person> result = new Result<>();
+        result.setData(new Person("test1"));
+        return result;
     }
 }

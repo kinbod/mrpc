@@ -2,7 +2,9 @@ package com.kongzhong.mrpc.registry;
 
 import com.github.zkclient.IZkClient;
 import com.github.zkclient.ZkClient;
-import com.kongzhong.mrpc.config.ServerConfig;
+import com.kongzhong.mrpc.exception.RpcException;
+import com.kongzhong.mrpc.model.ServiceBean;
+import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -18,37 +20,40 @@ public class ZookeeperServiceRegistry implements ServiceRegistry {
     }
 
     @Override
-    public void register(String data) {
-        removeNode(data);
-        createNode(data);
+    public void register(ServiceBean serviceBean) throws RpcException {
+        if (null == serviceBean) {
+            throw new RpcException("Service bean not is null");
+        }
+        removeNode(serviceBean);
+        createNode(serviceBean);
     }
 
     @Override
-    public void unregister(String data) {
-
+    public void unregister(ServiceBean serviceBean) throws RpcException {
+        if (null == serviceBean) {
+            throw new RpcException("Service bean not is null");
+        }
+        removeNode(serviceBean);
     }
 
-    private void removeNode(String node) {
-        String host = ServerConfig.me().getHost();
-        int port = ServerConfig.me().getPort();
-        String appId = ServerConfig.me().getAppId();
-
-        String address = host + ":" + port;
+    private void removeNode(ServiceBean serviceBean) {
+        String appId = serviceBean.getAppId();
+        String node = serviceBean.getServiceName();
+        String serverAddr = StringUtils.isNotEmpty(serviceBean.getElasticIp()) ? serviceBean.getElasticIp() : serviceBean.getAddress();
 
         // node path = rootPath + appId + node + address
-        String path = Constant.ZK_ROOT + "/" + appId + "/" + node + "/" + address;
+        String path = Constant.ZK_ROOT + "/" + appId + "/" + node + "/" + serverAddr;
         if (zkClient.exists(path)) {
             if (!zkClient.delete(path)) {
-                log.warn("delete node [{}] fail", path);
+                log.warn("Delete node [{}] fail", path);
             }
         }
     }
 
-    private void createNode(String node) {
-        String host = ServerConfig.me().getHost();
-        int port = ServerConfig.me().getPort();
-        String appId = ServerConfig.me().getAppId();
-        String address = host + ":" + port;
+    private void createNode(ServiceBean serviceBean) {
+        String appId = serviceBean.getAppId();
+        String node = serviceBean.getServiceName();
+        String serverAddr = StringUtils.isNotEmpty(serviceBean.getElasticIp()) ? serviceBean.getElasticIp() : serviceBean.getAddress();
 
         // node path = rootPath + appId + node + address
         String path = Constant.ZK_ROOT + "/" + appId + "/" + node;
@@ -56,8 +61,10 @@ public class ZookeeperServiceRegistry implements ServiceRegistry {
             zkClient.createPersistent(path, true);
         }
 
-        log.debug("create node [{}]", path);
-        zkClient.createEphemeral(path + "/" + address, "".getBytes());
+        log.debug("Create node [{}]", path);
+
+        String serviceNode = path + "/" + serverAddr;
+        zkClient.createEphemeral(serviceNode, "".getBytes());
     }
 
 }

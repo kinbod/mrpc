@@ -1,12 +1,14 @@
 package com.kongzhong.mrpc.demo.service;
 
+import com.kongzhong.mrpc.demo.exception.BizException;
 import com.kongzhong.mrpc.demo.model.Person;
 import com.kongzhong.mrpc.demo.model.Result;
 import com.kongzhong.mrpc.demo.model.StatusEnum;
-import com.kongzhong.mrpc.utils.StringUtils;
+import org.hibernate.validator.constraints.NotEmpty;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * @author biezhi
@@ -30,13 +32,24 @@ public interface UserService {
 
     Result<Person> getResult();
 
+    void setPersons(@NotEmpty(message = "参数不能为空") List<Person> persons);
+
     Map toMap(Map<String, Integer> map);
 
     void testArray(String[] strs);
 
-    void testBizExp();
+    void testBizExp(Integer num) throws BizException;
 
-    void testNormalExp();
+    void testNormalExp() throws Exception;
 
     StatusEnum testEnum(StatusEnum statusEnum);
+
+    default void testTimeout(int timeOut) {
+        try {
+            TimeUnit.SECONDS.sleep(timeOut);
+            System.out.println("执行完毕");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 }

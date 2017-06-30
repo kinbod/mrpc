@@ -5,12 +5,12 @@
     <parent>
         <artifactId>mrpc</artifactId>
         <groupId>com.kongzhong.mrpc</groupId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.0.8-SNAPSHOT</version>
     </parent>
 
     <modelVersion>4.0.0</modelVersion>
     <artifactId>mrpc-core</artifactId>
-    <version>0.0.2-SNAPSHOT</version>
+    <packaging>jar</packaging>
 
     <dependencies>
 
@@ -20,7 +20,7 @@
             <version>${mrpc-common.version}</version>
         </dependency>
 
-        <!--json序列化-->
+        <!-- jackson -->
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
@@ -28,23 +28,31 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- netty4 -->
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-all</artifactId>
             <version>${netty.version}</version>
         </dependency>
 
+        <!-- springframework -->
         <dependency>
             <groupId>org.springframework</groupId>
             <artifactId>spring-context</artifactId>
             <version>${spring.version}</version>
         </dependency>
 
+        <!-- test -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-web</artifactId>
-            <version>1.4.0.RELEASE</version>
-            <scope>provided</scope>
+            <groupId>com.kongzhong.mrpc</groupId>
+            <artifactId>mrpc-serialize-kryo</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.kongzhong.mrpc</groupId>
+            <artifactId>mrpc-serialize-protostuff</artifactId>
+            <scope>test</scope>
         </dependency>
 
     </dependencies>

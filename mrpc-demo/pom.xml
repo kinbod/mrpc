@@ -5,7 +5,7 @@
     <parent>
         <artifactId>mrpc</artifactId>
         <groupId>com.kongzhong.mrpc</groupId>
-        <version>0.0.1-SNAPSHOT</version>
+        <version>0.0.8-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
@@ -19,6 +19,7 @@
         <module>demo-server-other</module>
         <module>spring-boot-server</module>
         <module>spring-boot-client</module>
+        <module>spring-boot-server-and-client</module>
     </modules>
 
     <dependencies>
@@ -72,5 +73,24 @@
 
     </dependencies>
 
+
+    <repositories>
+        <repository>
+            <id>releases</id>
+            <name>Popocloud Release Repository</name>
+            <url>http://106.75.120.228:8083/nexus/content/repositories/releases/</url>
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+        </repository>
+        <repository>
+            <snapshots>
+                <enabled>true</enabled>
+            </snapshots>
+            <id>snapshots</id>
+            <name>Popocloud Snapshot Repository</name>
+            <url>http://106.75.120.228:8083/nexus/content/repositories/snapshots/</url>
+        </repository>
+    </repositories>
 
 </project>

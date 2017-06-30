@@ -65,13 +65,14 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public void testBizExp() {
-        throw new BizException("xx对象不能为空");
+    public void testBizExp(Integer num) throws BizException {
+        num.compareTo(222);
+        throw new BizException(1200, "xx对象不能为空");
     }
 
     @Override
-    public void testNormalExp() {
-        int a = 1 / 0;
+    public void testNormalExp() throws Exception {
+        throw new Exception("我是一个异常");
     }
 
     @Override
@@ -87,6 +88,11 @@ public class UserServiceImpl implements UserService {
         List<Person> list = new ArrayList<>();
         list.add(person);
         return list;
+    }
+
+    @Override
+    public void setPersons(List<Person> persons) {
+        System.out.println(persons);
     }
 
     @Override

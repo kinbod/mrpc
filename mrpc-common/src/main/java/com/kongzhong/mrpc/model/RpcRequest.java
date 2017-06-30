@@ -1,9 +1,6 @@
 package com.kongzhong.mrpc.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import lombok.ToString;
+import lombok.*;
 
 import java.io.Serializable;
 
@@ -13,14 +10,18 @@ import java.io.Serializable;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+@Builder
 @ToString
 public class RpcRequest implements Serializable {
 
+    private String appId;
     private String requestId;
     private String className;
     private String methodName;
     private Class<?>[] parameterTypes;
     private Object[] parameters;
     private Class<?> returnType;
+    private long timestamp;
+    private int waitTimeout;
 
 }

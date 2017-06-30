@@ -1,14 +1,16 @@
 package com.kongzhong.mrpc.transport.tcp;
 
-import com.kongzhong.mrpc.codec.RpcEncoder;
+import com.kongzhong.mrpc.serialize.RpcDecoder;
+import com.kongzhong.mrpc.serialize.RpcEncoder;
 import com.kongzhong.mrpc.config.ClientConfig;
 import com.kongzhong.mrpc.model.RpcRequest;
 import com.kongzhong.mrpc.model.RpcResponse;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
-import com.kongzhong.mrpc.codec.RpcDecoder;
+import com.kongzhong.mrpc.transport.netty.NettyClient;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
 
 /**
  * tcp客户端ChannelInitializer
@@ -18,9 +20,12 @@ import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
  */
 public class TcpClientChannelInitializer extends ChannelInitializer<SocketChannel> {
 
-    private RpcSerialize rpcSerialize = ClientConfig.me().getRpcSerialize();
+    private RpcSerialize rpcSerialize;
+    private NettyClient nettyClient;
 
-    public TcpClientChannelInitializer() {
+    public TcpClientChannelInitializer(NettyClient nettyClient) {
+        this.rpcSerialize = ClientConfig.me().getRpcSerialize();
+        this.nettyClient = nettyClient;
     }
 
     @Override
@@ -28,7 +33,8 @@ public class TcpClientChannelInitializer extends ChannelInitializer<SocketChanne
         sc.pipeline()
                 .addLast(new RpcEncoder(rpcSerialize, RpcRequest.class))
                 .addLast(new LengthFieldBasedFrameDecoder(Integer.MAX_VALUE, 0, RpcSerialize.MESSAGE_LENGTH, 0, 0))
+                .addLast(new LengthFieldPrepender(4, false))
                 .addLast(new RpcDecoder(rpcSerialize, RpcResponse.class))
-                .addLast(new TcpClientHandler());
+                .addLast(new TcpClientHandler(nettyClient));
     }
 }
