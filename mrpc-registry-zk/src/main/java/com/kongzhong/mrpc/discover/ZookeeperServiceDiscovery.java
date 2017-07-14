@@ -5,8 +5,9 @@ import com.github.zkclient.IZkClient;
 import com.github.zkclient.IZkStateListener;
 import com.github.zkclient.ZkClient;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
-import com.kongzhong.mrpc.client.cluster.Connections;
+import com.kongzhong.mrpc.Const;
+import com.kongzhong.mrpc.client.Connections;
+import com.kongzhong.mrpc.client.LocalServiceNodeTable;
 import com.kongzhong.mrpc.config.ClientConfig;
 import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.model.ClientBean;
@@ -19,10 +20,10 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.zookeeper.Watcher;
 
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.Collectors;
 
 /**
  * Zookeeper服务发现
@@ -41,6 +42,8 @@ public class ZookeeperServiceDiscovery implements ServiceDiscovery {
     private IZkChildListener zkChildListener = new ZkChildListener();
 
     private Map<String, IZkChildListener> subRelate = Maps.newConcurrentMap();
+
+    private Lock lock = new ReentrantLock();
 
     public ZookeeperServiceDiscovery(String zkAddr) {
         this.zkAddr = zkAddr;
@@ -75,24 +78,31 @@ public class ZookeeperServiceDiscovery implements ServiceDiscovery {
 
         Set<String> addressSet = this.discoveryService(clientBean.getServiceName());
         if (CollectionUtils.isEmpty(addressSet)) {
-            log.warn("Can not find any address node on path: {}. please check your zookeeper services :)", clientBean.getServiceName());
+            System.out.println();
+
+            log.warn("Can not find any address node on service: [{}]. please check your zookeeper services :)", clientBean.getServiceName());
+
+            // 发现不到的服务添加到本地服务缓存表，并设置为挂掉状态
+            if (!LocalServiceNodeTable.exists(clientBean.getServiceName())) {
+                LocalServiceNodeTable.addService(Const.EMPTY_SERVER, clientBean.getServiceName());
+                LocalServiceNodeTable.setNodeDead(Const.EMPTY_SERVER);
+                log.warn("Add local dead service [{}]\n", clientBean.getServiceName());
+            }
+
         } else {
             // update node list
-            Connections.me().asyncDirectConnect(clientBean.getServiceName(), addressSet);
+            Connections.me().syncDirectConnect(clientBean.getServiceName(), addressSet);
         }
-
     }
 
     private Set<String> discoveryService(String serviceName) {
         String appId = ClientConfig.me().getAppId();
-        String path = Constant.ZK_ROOT + "/" + appId + "/" + serviceName;
+        String path  = Constant.ZK_ROOT + "/" + appId + "/" + serviceName;
         // 发现地址列表
         Set<String> addressSet = new HashSet<>();
         if (zkClient.exists(path)) {
             List<String> addresses = zkClient.getChildren(path);
-            addresses.forEach(address -> {
-                addressSet.add(address);
-            });
+            addresses.forEach(addressSet::add);
         }
         if (!subRelate.containsKey(path)) {
             subRelate.put(path, zkChildListener);
@@ -107,42 +117,33 @@ public class ZookeeperServiceDiscovery implements ServiceDiscovery {
      * @param zkClient
      * @throws RpcException
      */
-    private void watchNode(@NonNull final IZkClient zkClient) throws RpcException {
+    private synchronized void watchNode(@NonNull final IZkClient zkClient) throws RpcException {
         String appId = ClientConfig.me().getAppId();
-        String path = Constant.ZK_ROOT + "/" + appId;
+        String path  = Constant.ZK_ROOT + "/" + appId;
 
         List<String> serviceList = zkClient.getChildren(path);
         if (CollectionUtils.isEmpty(serviceList)) {
-            log.warn("Can not find any address node on path: {}. please check your zookeeper services :)", path);
+            System.out.println();
+            log.warn("Can not find any address node on path: {}. please check your zookeeper services :)\n", path);
         } else {
 
-            log.debug("Watch node changed: {}", serviceList);
+            if (CollectionUtils.isNotEmpty(LocalServiceNodeTable.getDeadServices())) {
+                serviceList.retainAll(LocalServiceNodeTable.getDeadServices());
+                log.debug("Dead service changed: {}", serviceList);
 
-            // { 127.0.0.1:5066 => [UserService, BatService] }
-            Map<String, Set<String>> mappings = Maps.newHashMap();
-            Set<String> dieServices = new HashSet<>();
-            Connections.me().getDieServices().values().forEach(value -> {
-                value.forEach(val -> dieServices.add(val));
-            });
-
-            serviceList.forEach(service -> {
-                // 只更新本地缓存的服务列表
-                if (dieServices.contains(service)) {
-                    Set<String> addressSet = this.discoveryService(service);
-                    addressSet.forEach(address -> {
-                        if (!mappings.containsKey(address)) {
-                            mappings.put(address, Sets.newHashSet(service));
-                        } else {
-                            mappings.get(address).add(service);
-                        }
-                    });
+                Map<String, Set<String>> serviceMap = new HashMap<>();
+                for (String service : serviceList) {
+                    Set<String> address = this.discoveryService(service);
+                    if (null != address && !address.isEmpty()) {
+                        serviceMap.put(service, address);
+                    }
                 }
-            });
-
-            log.debug("Update node list: {}", mappings);
-
-            // update node list
-            Connections.me().asyncConnect(mappings);
+                // update node list
+                if (CollectionUtils.isNotEmpty(serviceMap.values())) {
+                    log.debug("Update node list: {}", serviceMap.values().stream().flatMap(Collection::stream).distinct().collect(Collectors.toList()));
+                }
+                Connections.me().recoverConnect(serviceMap);
+            }
         }
     }
 

@@ -2,17 +2,23 @@ package com.kongzhong.mrpc.client.proxy;
 
 import com.google.common.reflect.AbstractInvocationHandler;
 import com.kongzhong.mrpc.annotation.Command;
+import com.kongzhong.mrpc.client.LocalServiceNodeTable;
 import com.kongzhong.mrpc.client.cluster.HaStrategy;
 import com.kongzhong.mrpc.client.cluster.LoadBalance;
-import com.kongzhong.mrpc.client.cluster.loadblance.SimpleLoadBalance;
+import com.kongzhong.mrpc.client.cluster.ha.HighAvailableFactory;
+import com.kongzhong.mrpc.client.cluster.loadblance.LoadBalanceFactory;
+import com.kongzhong.mrpc.client.invoke.ClientInvocation;
+import com.kongzhong.mrpc.client.invoke.RpcInvoker;
 import com.kongzhong.mrpc.config.ClientConfig;
+import com.kongzhong.mrpc.enums.HaStrategyEnum;
 import com.kongzhong.mrpc.enums.LbStrategyEnum;
+import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.exception.SystemException;
-import com.kongzhong.mrpc.interceptor.ClientInvocation;
 import com.kongzhong.mrpc.interceptor.InterceptorChain;
 import com.kongzhong.mrpc.interceptor.Invocation;
-import com.kongzhong.mrpc.interceptor.RpcClientInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
 import com.kongzhong.mrpc.model.RpcRequest;
+import com.kongzhong.mrpc.transport.netty.SimpleClientHandler;
 import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.extern.slf4j.Slf4j;
 
@@ -28,32 +34,24 @@ import static com.kongzhong.mrpc.Const.CLIENT_INTERCEPTOR_PREFIX;
  *         2017/4/28
  */
 @Slf4j
-public class SimpleClientProxy<T> extends AbstractInvocationHandler {
+public class SimpleClientProxy extends AbstractInvocationHandler {
 
     // 负载均衡器
     protected LoadBalance loadBalance;
-
-    // HA策略
-    protected HaStrategy haStrategy;
 
     // 是否有客户端拦截器
     protected boolean hasInterceptors;
 
     // 客户端拦截器列表
-    protected List<RpcClientInteceptor> interceptors;
+    protected List<RpcClientInterceptor> interceptors;
 
     // 拦截器链
     protected InterceptorChain interceptorChain = new InterceptorChain();
 
     private String appId;
 
-    public SimpleClientProxy(List<RpcClientInteceptor> interceptors) {
+    public SimpleClientProxy(List<RpcClientInterceptor> interceptors) {
         this.appId = ClientConfig.me().getAppId();
-        this.haStrategy = ClientConfig.me().getHaStrategy();
-
-        if (null == this.haStrategy) {
-            throw new SystemException("HaStrategy not is null");
-        }
 
         LbStrategyEnum lbStrategy = ClientConfig.me().getLbStrategy();
         if (null == lbStrategy) {
@@ -61,14 +59,14 @@ public class SimpleClientProxy<T> extends AbstractInvocationHandler {
         }
 
         this.interceptors = interceptors;
-        this.loadBalance = new SimpleLoadBalance(lbStrategy);
+        this.loadBalance = LoadBalanceFactory.getLoadBalance(lbStrategy);
 
         if (null != interceptors && !interceptors.isEmpty()) {
             hasInterceptors = true;
             int pos = interceptors.size();
-            log.info("Add interceptors {}", interceptors.toString());
-            for (RpcClientInteceptor rpcInteceptor : interceptors) {
-                interceptorChain.addLast(CLIENT_INTERCEPTOR_PREFIX + (pos--), rpcInteceptor);
+            log.info("Add interceptor {}", interceptors.toString());
+            for (RpcClientInterceptor rpcClientInterceptor : interceptors) {
+                interceptorChain.addLast(CLIENT_INTERCEPTOR_PREFIX + (pos--), rpcClientInterceptor);
             }
         }
     }
@@ -87,15 +85,44 @@ public class SimpleClientProxy<T> extends AbstractInvocationHandler {
                 .timestamp(System.currentTimeMillis())
                 .build();
 
+        HaStrategy haStrategy = HighAvailableFactory.getHaStrategy(this.getHaStrategy(method));
         if (!hasInterceptors) {
             return haStrategy.call(request, loadBalance);
         }
 
-        Invocation invocation = new ClientInvocation(haStrategy, loadBalance, request, interceptors);
+        SimpleClientHandler clientHandler = loadBalance.next(request.getClassName());
+        if (null == clientHandler) {
+            log.warn("Local service mappings: {}", LocalServiceNodeTable.SERVICE_MAPPINGS);
+            throw new RpcException("Service [" + request.getClassName() + "] not found.");
+        }
+
+        RpcInvoker rpcInvoker = new RpcInvoker(request, clientHandler);
+        Invocation invocation = new ClientInvocation(rpcInvoker, interceptors);
         Object result = invocation.next();
         return result;
     }
 
+    /**
+     * 获取该方法的高可用策略
+     *
+     * @param method
+     * @return
+     */
+    private HaStrategyEnum getHaStrategy(Method method) {
+        HaStrategyEnum haStrategyEnum = ClientConfig.me().getHaStrategy();
+        Command command = method.getAnnotation(Command.class);
+        if (null != command) {
+            haStrategyEnum = command.haStrategy();
+        }
+        return haStrategyEnum;
+    }
+
+    /**
+     * 获取该方法的调用超时
+     *
+     * @param method
+     * @return
+     */
     private int getWaitTimeout(Method method) {
         Command command = method.getAnnotation(Command.class);
         int timeout = ClientConfig.me().getWaitTimeout();

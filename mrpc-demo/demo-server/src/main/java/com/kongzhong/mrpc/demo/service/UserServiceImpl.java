@@ -29,7 +29,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public String hello(String name) {
-        return "Hello, " + name;
+        return "rpc => " + name;
     }
 
     @Override
@@ -66,7 +66,6 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void testBizExp(Integer num) throws BizException {
-        num.compareTo(222);
         throw new BizException(1200, "xx对象不能为空");
     }
 

@@ -1,9 +1,10 @@
 package com.kongzhong.mrpc.server;
 
+import com.kongzhong.mrpc.Const;
 import com.kongzhong.mrpc.annotation.RpcService;
 import com.kongzhong.mrpc.enums.RegistryEnum;
 import com.kongzhong.mrpc.exception.SystemException;
-import com.kongzhong.mrpc.interceptor.RpcServerInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcServerInterceptor;
 import com.kongzhong.mrpc.model.RegistryBean;
 import com.kongzhong.mrpc.model.ServiceBean;
 import com.kongzhong.mrpc.registry.DefaultRegistry;
@@ -12,6 +13,7 @@ import com.kongzhong.mrpc.spring.utils.AopTargetUtils;
 import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.InitializingBean;
@@ -19,8 +21,6 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 
 import java.util.Map;
-
-import static com.kongzhong.mrpc.Const.MRPC_SERVER_REGISTRY_PREFIX;
 
 /**
  * RPC服务端Spring实现
@@ -31,6 +31,7 @@ import static com.kongzhong.mrpc.Const.MRPC_SERVER_REGISTRY_PREFIX;
 @Slf4j
 @Data
 @NoArgsConstructor
+@ToString(callSuper = true, exclude = {"transferSelector"})
 public class RpcSpringServer extends SimpleRpcServer implements ApplicationContextAware, InitializingBean {
 
     /**
@@ -41,6 +42,7 @@ public class RpcSpringServer extends SimpleRpcServer implements ApplicationConte
      */
     @Override
     public void setApplicationContext(ApplicationContext ctx) throws BeansException {
+        System.out.println(Const.SERVER_BANNER);
 
         // 注册中心
         Map<String, RegistryBean> registryBeanMap = ctx.getBeansOfType(RegistryBean.class);
@@ -51,7 +53,7 @@ public class RpcSpringServer extends SimpleRpcServer implements ApplicationConte
         if (StringUtils.isNotEmpty(this.interceptors)) {
             String[] inters = this.interceptors.split(",");
             for (String interceptorName : inters) {
-                RpcServerInteceptor rpcServerInteceptor = (RpcServerInteceptor) ctx.getBean(interceptorName);
+                RpcServerInterceptor rpcServerInteceptor = (RpcServerInterceptor) ctx.getBean(interceptorName);
                 rpcMapping.addInterceptor(rpcServerInteceptor);
             }
         }
@@ -104,13 +106,7 @@ public class RpcSpringServer extends SimpleRpcServer implements ApplicationConte
         if (RegistryEnum.ZOOKEEPER.getName().equals(type)) {
             String zkAddr = registryBean.getAddress();
             log.info("RPC server connect zookeeper address: {}", zkAddr);
-            try {
-                Object zookeeperServiceRegistry = Class.forName("com.kongzhong.mrpc.registry.ZookeeperServiceRegistry").getConstructor(String.class).newInstance(zkAddr);
-                ServiceRegistry serviceRegistry = (ServiceRegistry) zookeeperServiceRegistry;
-                return serviceRegistry;
-            } catch (Exception e) {
-                log.error("", e);
-            }
+            return super.getZookeeperServiceRegistry(zkAddr);
         }
         return null;
     }

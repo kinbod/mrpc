@@ -15,9 +15,13 @@ public class IndexController {
     @Autowired
     private UserService userService;
 
-    @GetMapping("/")
-    public String index(String name) {
-        return userService.hello(name);
+    @GetMapping("/hello")
+    public String index(String msg, Integer timeout) {
+        if (null != timeout) {
+            userService.testTimeout(timeout);
+            return "ok";
+        }
+        return userService.hello(msg);
     }
 
 }

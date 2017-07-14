@@ -1,9 +1,9 @@
 package com.kongzhong.mrpc.interceptor.validator;
 
 
-import com.kongzhong.mrpc.interceptor.RpcServerInteceptor;
-import com.kongzhong.mrpc.interceptor.ServerInvocation;
 import com.kongzhong.mrpc.interceptor.validator.exception.ValidateException;
+import com.kongzhong.mrpc.interceptor.RpcServerInterceptor;
+import com.kongzhong.mrpc.interceptor.ServerInvocation;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.validation.ConstraintViolation;
@@ -18,7 +18,7 @@ import java.util.Set;
  * 验证拦截器
  */
 @Slf4j
-public class ValidateInterceptor implements RpcServerInteceptor {
+public class ValidateInterceptor implements RpcServerInterceptor {
     //默认
     private static final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
 

@@ -3,9 +3,9 @@ package com.kongzhong.mrpc.transport.tcp;
 import com.kongzhong.mrpc.client.RpcCallbackFuture;
 import com.kongzhong.mrpc.model.RpcRequest;
 import com.kongzhong.mrpc.model.RpcResponse;
+import com.kongzhong.mrpc.serialize.jackson.JacksonSerialize;
 import com.kongzhong.mrpc.transport.netty.NettyClient;
 import com.kongzhong.mrpc.transport.netty.SimpleClientHandler;
-import com.kongzhong.mrpc.serialize.jackson.JacksonSerialize;
 import io.netty.channel.ChannelHandlerContext;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,22 +17,22 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class TcpClientHandler extends SimpleClientHandler<RpcResponse> {
 
-    public TcpClientHandler(NettyClient nettyClient) {
+    TcpClientHandler(NettyClient nettyClient) {
         super(nettyClient);
     }
 
     /**
      * 每次客户端发送一次RPC请求的 时候调用.
      *
-     * @param request
-     * @return
+     * @param request   RpcRequest对象
+     * @return 返回一个RpcCallbackFuture
      */
     public RpcCallbackFuture sendRequest(RpcRequest request) {
 
         RpcCallbackFuture rpcCallbackFuture = new RpcCallbackFuture(request);
         callbackFutureMap.put(request.getRequestId(), rpcCallbackFuture);
 
-        log.debug("Request body: \n{}", JacksonSerialize.toJSONString(request, true));
+        log.debug("Client send body: \n{}", JacksonSerialize.toJSONString(request, true));
 
         this.setChannelRequestId(request.getRequestId());
         channel.writeAndFlush(request);
@@ -42,7 +42,7 @@ public class TcpClientHandler extends SimpleClientHandler<RpcResponse> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, RpcResponse response) throws Exception {
         if (response.getSuccess()) {
-            log.debug("Response body: \n{}", JacksonSerialize.toJSONString(response, true));
+            log.debug("Client receive body: \n{}", JacksonSerialize.toJSONString(response, true));
         }
         String requestId = response.getRequestId();
         RpcCallbackFuture rpcCallbackFuture = callbackFutureMap.get(requestId);
@@ -54,7 +54,7 @@ public class TcpClientHandler extends SimpleClientHandler<RpcResponse> {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        log.error("Client handler error", cause);
+        log.error("Client receive body error", cause);
         super.sendError(ctx, cause);
 //        ctx.close();
     }

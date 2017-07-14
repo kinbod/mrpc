@@ -1,24 +1,22 @@
 package com.kongzhong.mrpc.server;
 
 import com.kongzhong.mrpc.exception.RpcException;
+import com.kongzhong.mrpc.exception.SystemException;
 import com.kongzhong.mrpc.interceptor.InterceptorChain;
 import com.kongzhong.mrpc.interceptor.Invocation;
-import com.kongzhong.mrpc.interceptor.RpcServerInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcServerInterceptor;
 import com.kongzhong.mrpc.interceptor.ServerInvocation;
 import com.kongzhong.mrpc.model.RpcContext;
 import com.kongzhong.mrpc.model.RpcRequest;
 import com.kongzhong.mrpc.model.RpcResponse;
 import com.kongzhong.mrpc.model.ServiceBean;
 import com.kongzhong.mrpc.serialize.jackson.JacksonSerialize;
-import com.kongzhong.mrpc.server.RpcMapping;
 import com.kongzhong.mrpc.utils.CollectionUtils;
-import com.kongzhong.mrpc.utils.ReflectUtils;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cglib.reflect.FastClass;
 import org.springframework.cglib.reflect.FastMethod;
 
 import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -33,23 +31,23 @@ import static com.kongzhong.mrpc.Const.SERVER_INTERCEPTOR_PREFIX;
 @Slf4j
 public abstract class AbstractResponseInvoker<T> implements Callable<T> {
 
-    protected Map<String, ServiceBean> serviceBeanMap;
-    protected List<RpcServerInteceptor> interceptors;
-    protected InterceptorChain interceptorChain = new InterceptorChain();
-    protected RpcRequest request;
-    protected RpcResponse response;
-    protected boolean hasInterceptors;
+    protected Map<String, ServiceBean>   serviceBeanMap   = null;
+    protected List<RpcServerInterceptor> interceptors     = null;
+    protected InterceptorChain           interceptorChain = new InterceptorChain();
+    protected RpcRequest                 request          = null;
+    protected RpcResponse                response         = null;
+    protected boolean                    hasInterceptors  = false;
 
     public AbstractResponseInvoker(RpcRequest request, RpcResponse response, Map<String, ServiceBean> serviceBeanMap) {
         this.request = request;
         this.response = response;
         this.serviceBeanMap = serviceBeanMap;
-        this.interceptors = RpcMapping.me().getInteceptors();
+        this.interceptors = RpcMapping.me().getServerInterceptors();
         if (CollectionUtils.isNotEmpty(interceptors)) {
             hasInterceptors = true;
             int pos = interceptors.size();
-            for (RpcServerInteceptor rpcInteceptor : interceptors) {
-                interceptorChain.addLast(SERVER_INTERCEPTOR_PREFIX + (pos--), rpcInteceptor);
+            for (RpcServerInterceptor interceptor : interceptors) {
+                interceptorChain.addLast(SERVER_INTERCEPTOR_PREFIX + (pos--), interceptor);
             }
         }
     }
@@ -79,14 +77,12 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
                 throw new RpcException("Not found service bean [" + serviceName + "]");
             }
 
-            Class<?> serviceClass = bean.getClass();
-            String methodName = request.getMethodName();
+            Class<?>   serviceClass   = bean.getClass();
+            String     methodName     = request.getMethodName();
             Class<?>[] parameterTypes = request.getParameterTypes();
-            Object[] parameters = request.getParameters();
+            Object[]   parameters     = request.getParameters();
 
-            Method method = ReflectUtils.method(serviceClass, methodName, parameterTypes);
-
-            FastClass serviceFastClass = FastClass.create(serviceClass);
+            FastClass  serviceFastClass  = FastClass.create(serviceClass);
             FastMethod serviceFastMethod = serviceFastClass.getMethod(methodName, parameterTypes);
 
             if (!hasInterceptors) {
@@ -95,7 +91,7 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
 
             //执行拦截器
             Invocation invocation = new ServerInvocation(serviceFastMethod, bean, parameters, request, interceptors);
-            Object result = invocation.next();
+            Object     result     = invocation.next();
             return result;
         } catch (Exception e) {
             throw e;
@@ -110,15 +106,23 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
      * @param t
      * @param response
      * @return
-     * @throws IllegalAccessException
      */
-    protected Throwable buildErrorResponse(Throwable t, RpcResponse response) throws IllegalAccessException {
+    protected Throwable buildErrorResponse(Throwable t, RpcResponse response) {
         t = t instanceof InvocationTargetException ? ((InvocationTargetException) t).getTargetException() : t;
-
-        String exception = JacksonSerialize.toJSONString(t);
-        response.setReturnType(t.getClass().getName());
+        String exception;
+        String className;
+        try {
+            t.getClass().getConstructor();
+            exception = JacksonSerialize.toJSONString(t);
+            className = t.getClass().getName();
+        } catch (Exception e) {
+            exception = JacksonSerialize.toJSONString(new SystemException(t.getMessage(), e));
+            className = SystemException.class.getName();
+        }
+        response.setReturnType(className);
         response.setException(exception);
         response.setSuccess(false);
+
         return t;
     }
 

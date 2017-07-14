@@ -1,6 +1,6 @@
 package com.kongzhong.mrpc.config;
 
-import com.kongzhong.mrpc.client.cluster.HaStrategy;
+import com.kongzhong.mrpc.enums.HaStrategyEnum;
 import com.kongzhong.mrpc.enums.LbStrategyEnum;
 import com.kongzhong.mrpc.enums.TransportEnum;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
@@ -16,38 +16,52 @@ import lombok.ToString;
  *         20/06/2017
  */
 @Data
-@NoArgsConstructor(access = AccessLevel.PRIVATE)
+@NoArgsConstructor
 @ToString(callSuper = true)
 public class ClientConfig {
 
     private String appId;
-    private HaStrategy haStrategy;
+    private HaStrategyEnum haStrategy = HaStrategyEnum.FAILOVER;
     private RpcSerialize rpcSerialize;
-    private LbStrategyEnum lbStrategy;
-    private TransportEnum transport;
+    private LbStrategyEnum lbStrategy = LbStrategyEnum.RANDOM;
+    private TransportEnum transport = TransportEnum.TCP;
 
-    // 跳过服务绑定
+    /**
+     * 跳过服务绑定
+     */
     private Boolean skipBind;
 
-    // 客户端服务调用超时，单位/毫秒
+    /**
+     * 客户端服务调用超时，单位/毫秒
+     */
     private int waitTimeout = 10_000;
 
-    // 快速失效重试次数
+    /**
+     * 快速失效重试次数
+     */
     private int failOverRetry = 3;
 
-    // 重试间隔，单位/毫秒 默认每3秒重连一次
+    /**
+     * 重试间隔，单位/毫秒 默认每3秒重连一次
+     */
     private int retryInterval = 3000;
 
-    // 重试次数，默认10次
+    /**
+     * 重试次数，默认10次
+     */
     private int retryCount = 10;
 
-    private static final class ClientCommonConfigHolder {
+    /**
+     * 客户端定时ping服务端的频率，单位/毫秒
+     */
+    private int pingInterval = -1;
 
+    private static final class ClientConfigHolder {
         private static final ClientConfig INSTANCE = new ClientConfig();
     }
 
     public static ClientConfig me() {
-        return ClientCommonConfigHolder.INSTANCE;
+        return ClientConfigHolder.INSTANCE;
     }
 
 }

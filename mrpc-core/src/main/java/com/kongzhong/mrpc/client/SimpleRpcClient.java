@@ -3,10 +3,6 @@ package com.kongzhong.mrpc.client;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.reflect.Reflection;
-import com.kongzhong.mrpc.client.cluster.Connections;
-import com.kongzhong.mrpc.client.cluster.HaStrategy;
-import com.kongzhong.mrpc.client.cluster.ha.FailFastHaStrategy;
-import com.kongzhong.mrpc.client.cluster.ha.FailOverHaStrategy;
 import com.kongzhong.mrpc.client.proxy.SimpleClientProxy;
 import com.kongzhong.mrpc.config.ClientConfig;
 import com.kongzhong.mrpc.config.NettyConfig;
@@ -16,13 +12,12 @@ import com.kongzhong.mrpc.enums.RegistryEnum;
 import com.kongzhong.mrpc.enums.TransportEnum;
 import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.exception.SystemException;
-import com.kongzhong.mrpc.interceptor.RpcClientInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
 import com.kongzhong.mrpc.model.ClientBean;
 import com.kongzhong.mrpc.model.RegistryBean;
 import com.kongzhong.mrpc.registry.DefaultDiscovery;
 import com.kongzhong.mrpc.registry.ServiceDiscovery;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
-import com.kongzhong.mrpc.utils.CollectionUtils;
 import com.kongzhong.mrpc.utils.ReflectUtils;
 import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.NoArgsConstructor;
@@ -76,25 +71,41 @@ public abstract class SimpleRpcClient {
     @Setter
     protected String haStrategy;
 
-    // 跳过服务绑定
+    /**
+     * 跳过服务绑定
+     */
     @Setter
     protected Boolean skipBind = false;
 
-    // 客户端服务调用超时，单位/毫秒
+    /**
+     * 客户端服务调用超时，单位/毫秒
+     */
     @Setter
     protected int waitTimeout = 10_000;
 
-    // 快速失效重试次数
+    /**
+     * 快速失效重试次数
+     */
     @Setter
     protected int failOverRetry = 3;
 
-    // 重试间隔，单位/毫秒 默认每3秒重连一次
+    /**
+     * 客户端断线重连间隔，单位/毫秒 默认每3秒重连一次
+     */
     @Setter
     protected int retryInterval = 3000;
 
-    // 重试次数，默认10次
+    /**
+     * 客户端断线重连次数，默认10次
+     */
     @Setter
     protected int retryCount = 10;
+
+    /**
+     * 客户端ping间隔
+     */
+    @Setter
+    protected int pingInterval = -1;
 
     /**
      * 服务注册实例
@@ -122,12 +133,12 @@ public abstract class SimpleRpcClient {
      * 引用类名
      */
     @Setter
-    protected List<ClientBean> referers = Lists.newArrayList();
+    protected List<ClientBean> clientBeans = Lists.newArrayList();
 
     /**
      * 客户端拦截器列表
      */
-    protected List<RpcClientInteceptor> inteceptors = Lists.newArrayList();
+    protected List<RpcClientInterceptor> rpcClientInteceptors = Lists.newArrayList();
 
     protected NettyConfig nettyConfig;
 
@@ -139,13 +150,13 @@ public abstract class SimpleRpcClient {
      * @return
      */
     protected <T> T getProxyBean(Class<T> rpcInterface) {
-        return (T) Reflection.newProxy(rpcInterface, new SimpleClientProxy<T>(inteceptors));
+        return Reflection.newProxy(rpcInterface, new SimpleClientProxy(rpcClientInteceptors));
     }
 
     /**
      * 获取服务使用的注册中心
      *
-     * @param serviceBean
+     * @param clientBean
      * @return
      */
     protected ServiceDiscovery getDiscovery(ClientBean clientBean) {
@@ -157,7 +168,6 @@ public abstract class SimpleRpcClient {
 
     protected void init() throws RpcException {
 
-        Connections connections = Connections.me();
         if (null == serialize) serialize = "kyro";
         if (null == transport) transport = "tcp";
         if (null == lbStrategy) lbStrategy = LbStrategyEnum.ROUND.name();
@@ -171,25 +181,19 @@ public abstract class SimpleRpcClient {
             rpcSerialize = ReflectUtils.newInstance("com.kongzhong.mrpc.serialize.ProtostuffSerialize", RpcSerialize.class);
         }
 
-        HaStrategy haStrategy = null;
-        if (this.haStrategy.equalsIgnoreCase(HaStrategyEnum.FAILOVER.name())) {
-            haStrategy = new FailOverHaStrategy();
-        }
-        if (this.haStrategy.equalsIgnoreCase(HaStrategyEnum.FAILFAST.name())) {
-            haStrategy = new FailFastHaStrategy();
-        }
-
         LbStrategyEnum lbStrategyEnum = LbStrategyEnum.valueOf(this.lbStrategy.toUpperCase());
         TransportEnum transportEnum = TransportEnum.valueOf(this.transport.toUpperCase());
+        HaStrategyEnum haStrategyEnum = HaStrategyEnum.valueOf(this.haStrategy.toUpperCase());
 
         ClientConfig.me().setAppId(appId);
         ClientConfig.me().setRpcSerialize(rpcSerialize);
-        ClientConfig.me().setHaStrategy(haStrategy);
+        ClientConfig.me().setHaStrategy(haStrategyEnum);
         ClientConfig.me().setLbStrategy(lbStrategyEnum);
         ClientConfig.me().setSkipBind(skipBind);
         ClientConfig.me().setRetryInterval(retryInterval);
         ClientConfig.me().setRetryCount(retryCount);
         ClientConfig.me().setWaitTimeout(waitTimeout);
+        ClientConfig.me().setPingInterval(pingInterval);
         ClientConfig.me().setTransport(transportEnum);
 
         log.info("{}", ClientConfig.me());
@@ -198,10 +202,7 @@ public abstract class SimpleRpcClient {
     }
 
     /**
-     * 直连
-     *
-     * @param directUrl
-     * @param rpcInterface
+     * 同步直连
      */
     protected void directConnect() {
         Map<String, Set<String>> mappings = Maps.newHashMap();
@@ -212,18 +213,7 @@ public abstract class SimpleRpcClient {
         if (null != nettyConfig) {
             Connections.me().setNettyConfig(nettyConfig);
         }
-        Connections.me().asyncConnect(mappings);
-    }
-
-    /**
-     * 绑定多个客户端引用服务
-     *
-     * @param interfaces 接口名
-     */
-    public void bindReferer(Class<?>... interfaces) {
-        if (CollectionUtils.isNotEmpty(interfaces)) {
-            Stream.of(interfaces).forEach(type -> referers.add(new ClientBean(type)));
-        }
+        Connections.me().syncConnect(mappings);
     }
 
     /**
@@ -242,7 +232,7 @@ public abstract class SimpleRpcClient {
      */
     public void bindReferer(String... interfaces) {
         if (null != interfaces) {
-            Stream.of(interfaces).forEach(type -> referers.add(new ClientBean(ReflectUtils.from(type))));
+            Stream.of(interfaces).forEach(type -> clientBeans.add(new ClientBean(ReflectUtils.from(type))));
         }
     }
 
@@ -251,12 +241,12 @@ public abstract class SimpleRpcClient {
      *
      * @param inteceptor
      */
-    public void addInterceptor(RpcClientInteceptor inteceptor) {
+    public void addInterceptor(RpcClientInterceptor inteceptor) {
         if (null == inteceptor) {
-            throw new IllegalArgumentException("RpcClientInteceptor not is null");
+            throw new IllegalArgumentException("RpcClientInterceptor not is null");
         }
         log.info("Add interceptor [{}]", inteceptor.toString());
-        this.inteceptors.add(inteceptor);
+        this.rpcClientInteceptors.add(inteceptor);
     }
 
     /**
@@ -289,9 +279,12 @@ public abstract class SimpleRpcClient {
                 }
 
                 log.debug("Service [{}] direct to [{}]", serviceName, directAddress);
-                List<ClientBean> directUrlServices = directAddressList.getOrDefault(directAddress, new ArrayList<>());
-                directUrlServices.add(clientBean);
-                directAddressList.put(directAddress, directUrlServices);
+
+                Stream.of(directAddress.split(",")).forEach(address -> {
+                    List<ClientBean> directUrlServices = directAddressList.getOrDefault(address, new ArrayList<>());
+                    directUrlServices.add(clientBean);
+                    directAddressList.put(address, directUrlServices);
+                });
             }
             log.info("Bind rpc service [{}]", serviceName);
         } catch (Exception e) {
@@ -349,8 +342,8 @@ public abstract class SimpleRpcClient {
      * 停止客户端，释放资源
      */
     public void shutdown() {
-        log.info("Stop mrpc client");
-        Connections.me().shutdown();
-        serviceDiscoveryMap.values().forEach(serviceDiscovery -> serviceDiscovery.stop());
+//        log.info("Stop mrpc client");
+//        Connections.me().shutdown();
+//        serviceDiscoveryMap.values().forEach(serviceDiscovery -> serviceDiscovery.stop());
     }
 }

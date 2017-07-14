@@ -2,8 +2,8 @@ package com.kongzhong.mrpc.transport.netty;
 
 import com.google.common.collect.Maps;
 import com.kongzhong.mrpc.Const;
+import com.kongzhong.mrpc.client.Connections;
 import com.kongzhong.mrpc.client.RpcCallbackFuture;
-import com.kongzhong.mrpc.client.cluster.Connections;
 import com.kongzhong.mrpc.config.NettyConfig;
 import com.kongzhong.mrpc.exception.SerializeException;
 import com.kongzhong.mrpc.model.RpcRequest;
@@ -18,6 +18,7 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Map;
+import java.util.concurrent.atomic.LongAdder;
 
 /**
  * 抽象客户端请求处理器
@@ -37,6 +38,8 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
     @Setter
     protected NettyClient nettyClient;
 
+    protected LongAdder hits = new LongAdder();
+
     protected final Map<String, RpcCallbackFuture> callbackFutureMap = Maps.newConcurrentMap();
 
     public SimpleClientHandler(NettyClient nettyClient) {
@@ -52,7 +55,6 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         log.debug("Channel actived: {}", this.channel);
-        nettyClient.resetRetryCount();
         super.channelActive(ctx);
     }
 
@@ -68,15 +70,29 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        if (nettyClient.isRunning()) {
-            log.debug("Channel inactive: {}", ctx.channel());
-            Connections.me().remove(this);
+        log.debug("Channel inActive: {}", ctx.channel());
+        this.nettyClient.cancelSchedule(ctx.channel());
 
-            // 断线重连
-            nettyClient.createBootstrap(ctx.channel().eventLoop());
-            super.channelInactive(ctx);
-        }
+        // 移除客户端Channel
+        Connections.me().inActive(this.nettyClient.getAddress());
 
+        ctx.channel().close().sync();
+//        if (nettyClient.isRunning()) {
+//            // 断线重连
+//            nettyClient.asyncCreateChannel(ctx.channel().eventLoop());
+//        }
+//        super.channelInactive(ctx);
+    }
+
+    /**
+     * 添加一次调用
+     */
+    public void addHit() {
+        hits.add(1);
+    }
+
+    public Long getHits() {
+        return hits.longValue();
     }
 
     /**
@@ -102,11 +118,11 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
      * 错误处理
      *
      * @param ctx
-     * @param status
+     * @param cause
      */
     protected void sendError(ChannelHandlerContext ctx, Throwable cause) throws SerializeException {
-        Channel channel = ctx.channel();
-        String requestId = channel.attr(AttributeKey.valueOf(Const.HEADER_REQUEST_ID)).get().toString();
+        Channel           channel           = ctx.channel();
+        String            requestId         = channel.attr(AttributeKey.valueOf(Const.HEADER_REQUEST_ID)).get().toString();
         RpcCallbackFuture rpcCallbackFuture = callbackFutureMap.get(requestId);
         if (rpcCallbackFuture != null) {
             callbackFutureMap.remove(requestId);

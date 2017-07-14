@@ -28,15 +28,15 @@ import static com.kongzhong.mrpc.Const.*;
 @Slf4j
 public class HttpClientHandler extends SimpleClientHandler<FullHttpResponse> {
 
-    public HttpClientHandler(NettyClient nettyClient) {
+    HttpClientHandler(NettyClient nettyClient) {
         super(nettyClient);
     }
 
     /**
      * 每次客户端发送一次RPC请求的 时候调用.
      *
-     * @param request
-     * @return
+     * @param rpcRequest    RpcRequest
+     * @return return RpcCallbackFuture
      */
     @Override
     public RpcCallbackFuture sendRequest(RpcRequest rpcRequest) {
@@ -53,7 +53,7 @@ public class HttpClientHandler extends SimpleClientHandler<FullHttpResponse> {
         try {
             String sendBody = JacksonSerialize.toJSONString(requestBody);
 
-            log.debug("Request body: \n{}", JacksonSerialize.toJSONString(requestBody, true));
+            log.debug("Client send body: \n{}", JacksonSerialize.toJSONString(requestBody, true));
 
             DefaultFullHttpRequest req = new DefaultFullHttpRequest(HttpVersion.HTTP_1_1, HttpMethod.POST, "/rpc");
             req.headers().set(HttpHeaders.Names.CONNECTION, HttpHeaders.Values.KEEP_ALIVE);
@@ -76,7 +76,7 @@ public class HttpClientHandler extends SimpleClientHandler<FullHttpResponse> {
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, FullHttpResponse httpResponse) throws Exception {
 
-        log.debug("Channel read: {}", ctx.channel());
+        log.debug("Client channel read: {}", ctx.channel());
 
         String body = httpResponse.content().toString(CharsetUtil.UTF_8);
         if (StringUtils.isEmpty(body)) {
@@ -93,11 +93,14 @@ public class HttpClientHandler extends SimpleClientHandler<FullHttpResponse> {
 
         RpcResponse rpcResponse = JacksonSerialize.parseObject(body, RpcResponse.class);
         if (rpcResponse.getSuccess()) {
-            log.debug("Response body: \n{}", body);
+            log.debug("Client receive body: \n{}", JacksonSerialize.toJSONString(rpcResponse, true));
             Object result = rpcResponse.getResult();
             if (null != result && null != rpcResponse.getReturnType() && !rpcResponse.getReturnType().equals(Void.class)) {
                 Method method = ReflectUtils.method(ReflectUtils.from(serviceClass), methodName);
-                Object object = JacksonSerialize.parseObject(JacksonSerialize.toJSONString(result), method.getGenericReturnType());
+                Object object = null;
+                if (method != null) {
+                    object = JacksonSerialize.parseObject(JacksonSerialize.toJSONString(result), method.getGenericReturnType());
+                }
                 rpcResponse.setResult(object);
             }
         }
@@ -111,7 +114,7 @@ public class HttpClientHandler extends SimpleClientHandler<FullHttpResponse> {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        log.error("Client accept error", cause);
+        log.error("Client receive body error", cause);
         super.sendError(ctx, cause);
 //        ctx.close();
     }

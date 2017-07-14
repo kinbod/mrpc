@@ -1,23 +1,18 @@
 package com.kongzhong.mrpc.springboot.server;
 
 import com.google.common.collect.Maps;
-import com.google.common.util.concurrent.*;
-import com.kongzhong.mrpc.common.thread.RpcThreadPool;
+import com.kongzhong.mrpc.Const;
+import com.kongzhong.mrpc.config.AdminConfig;
 import com.kongzhong.mrpc.config.NettyConfig;
-import com.kongzhong.mrpc.interceptor.RpcServerInteceptor;
-import com.kongzhong.mrpc.model.RpcRequest;
-import com.kongzhong.mrpc.model.RpcResponse;
 import com.kongzhong.mrpc.model.ServiceBean;
 import com.kongzhong.mrpc.registry.ServiceRegistry;
 import com.kongzhong.mrpc.server.SimpleRpcServer;
+import com.kongzhong.mrpc.springboot.config.AdminProperties;
 import com.kongzhong.mrpc.springboot.config.CommonProperties;
 import com.kongzhong.mrpc.springboot.config.NettyProperties;
 import com.kongzhong.mrpc.springboot.config.RpcServerProperties;
 import com.kongzhong.mrpc.utils.StringUtils;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelFutureListener;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.http.FullHttpResponse;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.BeanFactoryAware;
@@ -30,12 +25,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.core.annotation.Order;
 
-import java.util.List;
 import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ThreadPoolExecutor;
 
-import static com.kongzhong.mrpc.Const.HEADER_REQUEST_ID;
 import static com.kongzhong.mrpc.Const.MRPC_SERVER_REGISTRY_PREFIX;
 
 /**
@@ -45,8 +36,9 @@ import static com.kongzhong.mrpc.Const.MRPC_SERVER_REGISTRY_PREFIX;
  *         2017/5/13
  */
 @Conditional(ServerEnvironmentCondition.class)
-@EnableConfigurationProperties({CommonProperties.class, RpcServerProperties.class, NettyProperties.class})
+@EnableConfigurationProperties({CommonProperties.class, RpcServerProperties.class, NettyProperties.class, AdminProperties.class})
 @Slf4j
+@ToString(callSuper = true, exclude = {"commonProperties", "rpcServerProperties", "nettyProperties", "configurableBeanFactory", "customServiceMap"})
 public class RpcServerAutoConfigure extends SimpleRpcServer {
 
     @Autowired
@@ -59,6 +51,9 @@ public class RpcServerAutoConfigure extends SimpleRpcServer {
     private NettyProperties nettyProperties;
 
     @Autowired
+    private AdminProperties adminProperties;
+
+    @Autowired
     private ConfigurableBeanFactory configurableBeanFactory;
 
     /**
@@ -66,21 +61,9 @@ public class RpcServerAutoConfigure extends SimpleRpcServer {
      */
     private Map<String, Map<String, String>> customServiceMap = Maps.newHashMap();
 
-    /**
-     * 拦截器列表, 默认添加性能监控拦截器
-     */
-    private List<RpcServerInteceptor> interceptorList;
-
-    /**
-     * netty服务端配置
-     */
-    private NettyConfig nettyConfig;
-
-    private static final ListeningExecutorService LISTENING_EXECUTOR_SERVICE = MoreExecutors.listeningDecorator((ThreadPoolExecutor) RpcThreadPool.getExecutor(16, -1));
-
     @Bean
     public ServiceBeanProcessor initBean() {
-        log.debug("Initializing rpc service bean");
+        System.out.println(Const.SERVER_BANNER);
         return new ServiceBeanProcessor(rpcMapping);
     }
 
@@ -108,12 +91,18 @@ public class RpcServerAutoConfigure extends SimpleRpcServer {
             super.poolName = rpcServerProperties.getPoolName();
 
             // netty参数配置
-            BeanUtils.copyProperties(new NettyConfig(), nettyProperties);
+            super.nettyConfig = new NettyConfig();
+            super.adminConfig = new AdminConfig();
+
+            BeanUtils.copyProperties(nettyProperties, super.nettyConfig);
+            BeanUtils.copyProperties(adminProperties, super.adminConfig);
 
             super.test = StringUtils.isNotEmpty(commonProperties.getTest()) ? commonProperties.getTest() : rpcServerProperties.getTest();
 
             super.transport = rpcServerProperties.getTransport();
             super.serialize = rpcServerProperties.getSerialize();
+
+            configurableBeanFactory.registerSingleton("rpcMapping", rpcMapping);
         };
     }
 
@@ -169,72 +158,6 @@ public class RpcServerAutoConfigure extends SimpleRpcServer {
             return serviceRegistryMap.get(registryName);
         }
         return serviceRegistry;
-    }
-
-    /**
-     * 提交任务,异步获取结果.
-     *
-     * @param task
-     * @param ctx
-     * @param request
-     * @param response
-     */
-    public static void submit(Callable<Boolean> task, final ChannelHandlerContext ctx, final RpcRequest request, final RpcResponse response) {
-
-        //提交任务, 异步获取结果
-        ListenableFuture<Boolean> listenableFuture = LISTENING_EXECUTOR_SERVICE.submit(task);
-
-        //注册回调函数, 在task执行完之后 异步调用回调函数
-        Futures.addCallback(listenableFuture, new FutureCallback<Boolean>() {
-            @Override
-            public void onSuccess(Boolean result) {
-                //为返回msg回客户端添加一个监听器,当消息成功发送回客户端时被异步调用.
-                ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
-                    /**
-                     * 服务端回显 request已经处理完毕
-                     * @param channelFuture
-                     * @throws Exception
-                     */
-                    public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                        log.debug("Request id [{}] success.", request.getRequestId());
-                    }
-                });
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                log.error("", t);
-            }
-        }, LISTENING_EXECUTOR_SERVICE);
-    }
-
-    public static void submit(Callable<FullHttpResponse> task, final ChannelHandlerContext ctx) {
-        //提交任务, 异步获取结果
-        ListenableFuture<FullHttpResponse> listenableFuture = LISTENING_EXECUTOR_SERVICE.submit(task);
-        //注册回调函数, 在task执行完之后 异步调用回调函数
-        Futures.addCallback(listenableFuture, new FutureCallback<FullHttpResponse>() {
-            @Override
-            public void onSuccess(FullHttpResponse response) {
-                //为返回msg回客户端添加一个监听器,当消息成功发送回客户端时被异步调用.
-                ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
-                    /**
-                     * 服务端回显 request已经处理完毕
-                     * @param channelFuture
-                     * @throws Exception
-                     */
-                    @Override
-                    public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                        log.debug("Request id [{}] success.", response.headers().get(HEADER_REQUEST_ID));
-                    }
-
-                });
-            }
-
-            @Override
-            public void onFailure(Throwable t) {
-                log.error("", t);
-            }
-        }, LISTENING_EXECUTOR_SERVICE);
     }
 
 }

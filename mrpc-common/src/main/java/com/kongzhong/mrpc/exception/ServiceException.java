@@ -1,35 +1,29 @@
 package com.kongzhong.mrpc.exception;
 
+import lombok.Data;
+
 /**
- * 业务异常
+ * Rpc服务调用异常
  *
  * @author biezhi
  *         2017/4/24
  */
-public class ServiceException extends RuntimeException {
+@Data
+public class ServiceException extends Exception {
 
-    private String code;
-
-    public ServiceException() {
-    }
-
-    public ServiceException(String message) {
-        super(message);
-    }
-
-    public ServiceException(String message, Throwable cause) {
-        super(message, cause);
-    }
+    private String message;
+    private String exceptionType;
+    private String exceptionMeta;
 
     public ServiceException(Throwable cause) {
         super(cause);
     }
 
-    public String getCode() {
-        return code;
+    public ServiceException(String exceptionType, String message, String exceptionMeta) {
+        super(message);
+        this.exceptionType = exceptionType;
+        this.message = message;
+        this.exceptionMeta = exceptionMeta;
     }
 
-    public void setCode(String code) {
-        this.code = code;
-    }
 }

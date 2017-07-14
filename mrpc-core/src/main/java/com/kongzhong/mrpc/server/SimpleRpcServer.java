@@ -3,24 +3,26 @@ package com.kongzhong.mrpc.server;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.*;
 import com.kongzhong.mrpc.Const;
-import com.kongzhong.mrpc.common.thread.NamedThreadFactory;
 import com.kongzhong.mrpc.common.thread.RpcThreadPool;
+import com.kongzhong.mrpc.config.AdminConfig;
 import com.kongzhong.mrpc.config.NettyConfig;
 import com.kongzhong.mrpc.config.ServerConfig;
+import com.kongzhong.mrpc.enums.EventType;
+import com.kongzhong.mrpc.enums.NodeAliveStateEnum;
 import com.kongzhong.mrpc.enums.RegistryEnum;
+import com.kongzhong.mrpc.enums.TransportEnum;
+import com.kongzhong.mrpc.event.Event;
+import com.kongzhong.mrpc.event.EventManager;
 import com.kongzhong.mrpc.exception.InitializeException;
 import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.exception.SystemException;
-import com.kongzhong.mrpc.model.RpcRequest;
-import com.kongzhong.mrpc.model.RpcResponse;
-import com.kongzhong.mrpc.model.ServiceBean;
+import com.kongzhong.mrpc.model.*;
 import com.kongzhong.mrpc.registry.DefaultRegistry;
 import com.kongzhong.mrpc.registry.ServiceRegistry;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
+import com.kongzhong.mrpc.serialize.jackson.JacksonSerialize;
 import com.kongzhong.mrpc.transport.TransferSelector;
-import com.kongzhong.mrpc.utils.CollectionUtils;
-import com.kongzhong.mrpc.utils.ReflectUtils;
-import com.kongzhong.mrpc.utils.StringUtils;
+import com.kongzhong.mrpc.utils.*;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -29,13 +31,14 @@ import io.netty.handler.codec.http.FullHttpResponse;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
-import java.nio.channels.spi.SelectorProvider;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import static com.kongzhong.mrpc.Const.HEADER_REQUEST_ID;
 
@@ -47,6 +50,7 @@ import static com.kongzhong.mrpc.Const.HEADER_REQUEST_ID;
  */
 @Slf4j
 @NoArgsConstructor
+@ToString(exclude = {"rpcMapping", "transferSelector"})
 public abstract class SimpleRpcServer {
 
     /**
@@ -133,9 +137,18 @@ public abstract class SimpleRpcServer {
     protected NettyConfig nettyConfig;
 
     /**
+     * 后台配置
+     */
+    @Getter
+    @Setter
+    protected AdminConfig adminConfig;
+
+    /**
      * 服务端处理线程池
      */
     protected static ListeningExecutorService LISTENING_EXECUTOR_SERVICE;
+
+    private ScheduledFuture adminSchedule;
 
     /**
      * 启动RPC服务端
@@ -166,7 +179,7 @@ public abstract class SimpleRpcServer {
         }
 
         if (null == rpcSerialize) {
-            throw new InitializeException("rpc server serialize is null.");
+            throw new InitializeException("RPC server serialize is null.");
         }
 
         transferSelector = new TransferSelector(rpcSerialize);
@@ -175,11 +188,14 @@ public abstract class SimpleRpcServer {
 
     private void bindRpcServer() {
 
-        ThreadFactory threadRpcFactory = new NamedThreadFactory(poolName);
-        int parallel = Runtime.getRuntime().availableProcessors() * 2;
+        // 服务启动时
+        EventManager.me().fireEvent(EventType.SERVER_STARTING, Event.builder().rpcContext(RpcContext.get()).build());
 
-        EventLoopGroup boss = new NioEventLoopGroup();
-        EventLoopGroup worker = new NioEventLoopGroup(parallel, threadRpcFactory, SelectorProvider.provider());
+//        ThreadFactory threadRpcFactory = new NamedThreadFactory(poolName);
+//        int parallel = Runtime.getRuntime().availableProcessors() * 2;
+
+        EventLoopGroup boss   = new NioEventLoopGroup(1);
+        EventLoopGroup worker = new NioEventLoopGroup();
 
         try {
             ServerBootstrap bootstrap = new ServerBootstrap();
@@ -190,34 +206,48 @@ public abstract class SimpleRpcServer {
                     .childOption(ChannelOption.WRITE_BUFFER_WATER_MARK, new WriteBufferWaterMark(nettyConfig.getLowWaterMark(), nettyConfig.getHighWaterMark()));
 
             String[] ipAddr = address.split(":");
-            if (null == ipAddr || ipAddr.length != 2) {
+            if (null == ipAddr) {
                 throw new SystemException("RPC server bind address error, please check your server address and port.");
             }
 
-            //获取服务器IP地址和端口
-            String host = ipAddr[0];
-            int port = Integer.parseInt(ipAddr[1]);
+            String host = null;
+            int    port = -1;
 
+            if (ipAddr.length == 1) {
+                host = NetUtils.getLocalAddress().getHostAddress();
+                port = Integer.parseInt(ipAddr[0]);
+                this.address = host + ':' + port;
+            }
+
+            if (ipAddr.length == 2) {
+                host = ipAddr[0];
+                port = Integer.parseInt(ipAddr[1]);
+            }
+
+            //获取服务器IP地址和端口
             ServerConfig.me().setElasticIp(elasticIp);
             ChannelFuture future = bootstrap.bind(host, port).sync();
 
             //注册服务
             rpcMapping.getServiceBeanMap().values().forEach(serviceBean -> {
 
-                String appId = this.getAppId(serviceBean);
-                String serviceName = serviceBean.getServiceName();
-                String address = this.getBindAddress(serviceBean);
-                String elasticIp = this.getRegisterElasticIp(serviceBean);
+                String  appId        = this.getAppId(serviceBean);
+                String  address      = this.getBindAddress(serviceBean);
+                String  elasticIp    = this.getRegisterElasticIp(serviceBean);
                 boolean usedRegistry = this.usedRegistry(serviceBean);
+                String  serviceName  = serviceBean.getServiceName();
 
                 if (usedRegistry) {
                     // 查找该服务的注册中心
                     ServiceRegistry serviceRegistry = this.getRegistry(serviceBean);
                     try {
+                        serviceBean.setRegistry(this.getRegistryName(serviceBean));
                         serviceBean.setAppId(appId);
                         serviceBean.setAddress(address);
                         serviceBean.setElasticIp(elasticIp);
                         serviceRegistry.register(serviceBean);
+
+                        ServiceStatusTable.me().createServiceStatus(serviceBean);
                     } catch (RpcException e) {
                         log.error("Service register error", e);
                     }
@@ -227,6 +257,8 @@ public abstract class SimpleRpcServer {
                 } else {
                     log.info("Register => [{}] - [{}]", serviceName, address);
                 }
+                // 服务注册后
+                EventManager.me().fireEvent(EventType.SERVER_SERVICE_REGISTER, Event.builder().rpcContext(RpcContext.get()).build());
             });
 
             if (this.usedRegistry) {
@@ -234,6 +266,9 @@ public abstract class SimpleRpcServer {
             }
 
             log.info("Publish services finished, mrpc version [{}]", Const.VERSION);
+
+            // 服务启动后
+            EventManager.me().fireEvent(EventType.SERVER_STARTED, Event.builder().rpcContext(RpcContext.get()).build());
 
             this.channelSync(future);
 
@@ -252,6 +287,51 @@ public abstract class SimpleRpcServer {
      * @throws InterruptedException
      */
     private void channelSync(ChannelFuture future) throws InterruptedException {
+
+        if (null != adminConfig && adminConfig.isEnabled()) {
+
+            // 有客户端连接
+            EventManager.me().addEventListener(EventType.SERVER_CLIENT_CONNECTED, e -> {
+                ServiceStatusTable.me().addClient();
+            });
+
+            // 有客户端断开
+            EventManager.me().addEventListener(EventType.SERVER_CLIENT_DISCONNECT, e -> {
+                ServiceStatusTable.me().removeClient();
+            });
+
+            adminSchedule = future.channel().eventLoop().scheduleAtFixedRate(() -> {
+                String url = adminConfig.getUrl() + "/api/service";
+                ServiceNodePayload serviceNodePayload = ServiceNodePayload.builder()
+                        .address(this.address)
+                        .appId(this.appId)
+                        .availAble(NodeAliveStateEnum.ALIVE)
+                        .transport(TransportEnum.valueOf(this.transport.toUpperCase()))
+                        .services(ServiceStatusTable.me().getServiceStatus())
+                        .build();
+
+                String body = JacksonSerialize.toJSONString(serviceNodePayload);
+                log.debug("Request URL\t: {}", url);
+                log.debug("Send body\t\t: {}", body);
+
+                try {
+                    int code = HttpRequest.post(url)
+                            .contentType("application/json;charset=utf-8")
+                            .connectTimeout(10_000)
+                            .readTimeout(5000)
+                            .basic(adminConfig.getUsername(), adminConfig.getPassword())
+                            .send(body).code();
+
+                    log.debug("Response code: {}", code);
+                } catch (HttpRequest.HttpRequestException e) {
+                    log.debug("连接失败");
+                } catch (Exception e) {
+                    log.error("Send error", e);
+                    cancelAdminSchedule(true);
+                }
+            }, 100, adminConfig.getPeriod(), TimeUnit.MILLISECONDS);
+        }
+
         if ("true".equals(this.test)) {
             new Thread(() -> {
                 try {
@@ -265,10 +345,14 @@ public abstract class SimpleRpcServer {
         }
     }
 
+    private void cancelAdminSchedule(boolean mayInterruptIfRunning) {
+        adminSchedule.cancel(mayInterruptIfRunning);
+    }
+
     /**
      * 返回引用是否使用注册中心
      *
-     * @param clientBean
+     * @param serviceBean
      * @return
      */
     protected boolean usedRegistry(ServiceBean serviceBean) {
@@ -318,8 +402,11 @@ public abstract class SimpleRpcServer {
      * @return
      */
     protected ServiceRegistry getRegistry(ServiceBean serviceBean) {
-        String registryName = StringUtils.isNotEmpty(serviceBean.getRegistry()) ? serviceBean.getRegistry() : "default";
-        return serviceRegistryMap.get(registryName);
+        return serviceRegistryMap.get(getRegistryName(serviceBean));
+    }
+
+    protected String getRegistryName(ServiceBean serviceBean) {
+        return StringUtils.isNotEmpty(serviceBean.getRegistry()) ? serviceBean.getRegistry() : "default";
     }
 
     /**
@@ -347,7 +434,7 @@ public abstract class SimpleRpcServer {
                      * @throws Exception
                      */
                     public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                        log.debug("Request id [{}] success.", request.getRequestId());
+                        log.debug("Server execute [{}] success.", request.getRequestId());
                     }
                 });
             }
@@ -366,6 +453,9 @@ public abstract class SimpleRpcServer {
         Futures.addCallback(listenableFuture, new FutureCallback<FullHttpResponse>() {
             @Override
             public void onSuccess(FullHttpResponse response) {
+                // 服务端响应前
+                EventManager.me().fireEvent(EventType.SERVER_PRE_RESPONSE, Event.builder().rpcContext(RpcContext.get()).build());
+
                 //为返回msg回客户端添加一个监听器,当消息成功发送回客户端时被异步调用.
                 ctx.writeAndFlush(response).addListener(new ChannelFutureListener() {
                     /**
@@ -375,7 +465,7 @@ public abstract class SimpleRpcServer {
                      */
                     @Override
                     public void operationComplete(ChannelFuture channelFuture) throws Exception {
-                        log.debug("Request id [{}] success.", response.headers().get(HEADER_REQUEST_ID));
+                        log.debug("Server execute [{}] success.", response.headers().get(HEADER_REQUEST_ID));
                     }
 
                 });
@@ -407,13 +497,18 @@ public abstract class SimpleRpcServer {
                 throw new SystemException("Zookeeper connect address not is empty");
             }
             log.info("RPC server connect zookeeper address: {}", zkAddr);
-            try {
-                Object zookeeperServiceRegistry = Class.forName("com.kongzhong.mrpc.registry.ZookeeperServiceRegistry").getConstructor(String.class).newInstance(zkAddr);
-                ServiceRegistry serviceRegistry = (ServiceRegistry) zookeeperServiceRegistry;
-                return serviceRegistry;
-            } catch (Exception e) {
-                log.error("", e);
-            }
+            return this.getZookeeperServiceRegistry(zkAddr);
+        }
+        return null;
+    }
+
+    protected ServiceRegistry getZookeeperServiceRegistry(String zkAddr) {
+        try {
+            Object          zookeeperServiceRegistry = Class.forName("com.kongzhong.mrpc.registry.ZookeeperServiceRegistry").getConstructor(String.class).newInstance(zkAddr);
+            ServiceRegistry serviceRegistry          = (ServiceRegistry) zookeeperServiceRegistry;
+            return serviceRegistry;
+        } catch (Exception e) {
+            log.error("", e);
         }
         return null;
     }
@@ -426,10 +521,10 @@ public abstract class SimpleRpcServer {
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 
             rpcMapping.getServiceBeanMap().values().forEach(serviceBean -> {
-                String serviceName = serviceBean.getServiceName();
+                String          serviceName     = serviceBean.getServiceName();
                 ServiceRegistry serviceRegistry = getRegistry(serviceBean);
                 try {
-                    serviceRegistry.unregister(serviceBean);
+                    serviceRegistry.unRegister(serviceBean);
                     log.debug("Unregister service => [{}]", serviceName);
                 } catch (Exception e) {
                     log.error("Unregister service error", e);

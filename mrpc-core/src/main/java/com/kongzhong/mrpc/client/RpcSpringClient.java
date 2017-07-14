@@ -2,9 +2,8 @@ package com.kongzhong.mrpc.client;
 
 import com.google.common.collect.Sets;
 import com.kongzhong.mrpc.Const;
-import com.kongzhong.mrpc.client.cluster.Connections;
 import com.kongzhong.mrpc.config.NettyConfig;
-import com.kongzhong.mrpc.interceptor.RpcClientInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
 import com.kongzhong.mrpc.model.ClientBean;
 import com.kongzhong.mrpc.model.RegistryBean;
 import com.kongzhong.mrpc.utils.CollectionUtils;
@@ -35,6 +34,8 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
     @Override
     public void afterPropertiesSet() throws Exception {
 
+        System.out.println(Const.CLIENT_BANNER);
+
         if (super.skipBind) {
             log.info("RPC client skip bind service.");
             return;
@@ -47,7 +48,7 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
         }
 
         // 客户端拦截器
-        Map<String, RpcClientInteceptor> inteceptorMap = ctx.getBeansOfType(RpcClientInteceptor.class);
+        Map<String, RpcClientInterceptor> inteceptorMap = ctx.getBeansOfType(RpcClientInterceptor.class);
         if (CollectionUtils.isNotEmpty(inteceptorMap)) {
             inteceptorMap.values().forEach(super::addInterceptor);
         }
@@ -70,11 +71,11 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
         }
 
         // 初始化引用
-        referers.forEach(referer -> super.initReferer(referer, dbf));
+        clientBeans.forEach(referer -> super.initReferer(referer, dbf));
 
         super.directConnect();
 
-        log.info("Bind services finished, mrpc version [{}]", Const.VERSION);
+        log.info("Bind services finished.");
     }
 
     /***
@@ -93,8 +94,9 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
             }
         }
         if (null == ctx && StringUtils.isNotEmpty(directAddress)) {
+            String[] directAddressArr = directAddress.split(",");
             // 同步直连
-            Connections.me().asyncDirectConnect(rpcInterface.getName(), Sets.newHashSet(directAddress));
+            Connections.me().syncDirectConnect(Sets.newHashSet(rpcInterface.getName()), Sets.newHashSet(directAddressArr));
         }
         return this.getProxyBean(rpcInterface);
     }

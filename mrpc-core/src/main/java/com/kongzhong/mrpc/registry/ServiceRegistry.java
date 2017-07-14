@@ -1,6 +1,5 @@
 package com.kongzhong.mrpc.registry;
 
-import com.kongzhong.mrpc.exception.InitializeException;
 import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.model.ServiceBean;
 
@@ -17,7 +16,7 @@ public interface ServiceRegistry {
      * @param serviceBean
      * @throws RpcException
      */
-    void register(ServiceBean serviceBean) throws RpcException;
+    boolean register(ServiceBean serviceBean) throws RpcException;
 
     /**
      * 卸载一个服务
@@ -25,5 +24,5 @@ public interface ServiceRegistry {
      * @param serviceBean
      * @throws RpcException
      */
-    void unregister(ServiceBean serviceBean) throws RpcException;
+    void unRegister(ServiceBean serviceBean) throws RpcException;
 }

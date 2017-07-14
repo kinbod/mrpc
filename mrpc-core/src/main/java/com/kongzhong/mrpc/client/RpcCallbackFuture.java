@@ -22,43 +22,43 @@ import java.util.concurrent.locks.ReentrantLock;
 @Slf4j
 public class RpcCallbackFuture {
 
-    private RpcRequest request;
+    private RpcRequest  request;
     private RpcResponse response;
-    private Lock lock = new ReentrantLock();
-    private Condition finish = lock.newCondition();
-    private long startTime;
+    private Lock      lock      = new ReentrantLock();
+    private Condition finish    = lock.newCondition();
+    private long      startTime = System.currentTimeMillis();
 
     public RpcCallbackFuture(RpcRequest request) {
         this.request = request;
-        this.startTime = System.currentTimeMillis();
     }
 
     public Object get() throws Exception {
         return this.get(request.getWaitTimeout());
     }
 
-    public Object get(int millisconds) throws Exception {
+    public Object get(int milliseconds) throws Exception {
         try {
             lock.lock();
-            finish.await(millisconds, TimeUnit.MILLISECONDS);
+            finish.await(milliseconds, TimeUnit.MILLISECONDS);
 
+            if (null != response && response.getSuccess()) {
+                return response.getResult();
+            }
+
+            // 客户端调用超时
             long time = System.currentTimeMillis() - startTime;
-            if (time > millisconds) {
+            if (time > milliseconds) {
                 String msg = String.format("[Request %s.%s()] timeout", request.getClassName(), request.getMethodName());
                 log.warn(msg + ", {}ms", time);
                 throw new TimeoutException(msg);
             }
 
-            if (null == response) {
-                return null;
-            }
-
-            if (!response.getSuccess()) {
-                Class<?> expType = ReflectUtils.from(response.getReturnType());
+            if (null != response && !response.getSuccess()) {
+                Class<?>  expType   = ReflectUtils.from(response.getReturnType());
                 Exception exception = (Exception) JacksonSerialize.parseObject(response.getException(), expType);
-                throw new ServiceException(exception);
+                throw exception;
             }
-            return response.getResult();
+            return null;
         } finally {
             lock.unlock();
         }

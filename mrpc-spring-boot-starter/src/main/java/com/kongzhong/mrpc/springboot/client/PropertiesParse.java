@@ -3,6 +3,7 @@ package com.kongzhong.mrpc.springboot.client;
 import com.google.common.collect.Maps;
 import com.kongzhong.mrpc.Const;
 import com.kongzhong.mrpc.config.NettyConfig;
+import com.kongzhong.mrpc.enums.HaStrategyEnum;
 import com.kongzhong.mrpc.enums.LbStrategyEnum;
 import com.kongzhong.mrpc.exception.SystemException;
 import com.kongzhong.mrpc.springboot.config.CommonProperties;
@@ -53,11 +54,13 @@ public class PropertiesParse {
 
         clientProperties.setLbStrategy(env.getProperty(LB_STRATEGY_STYLE1_CLIENT, env.getProperty(LB_STRATEGY_STYLE2_CLIENT, LbStrategyEnum.ROUND.name())));
 
-        clientProperties.setHaStrategy(env.getProperty(LB_STRATEGY_STYLE1_CLIENT, env.getProperty(LB_STRATEGY_STYLE2_CLIENT)));
+        clientProperties.setHaStrategy(env.getProperty(LB_STRATEGY_STYLE1_CLIENT, env.getProperty(LB_STRATEGY_STYLE2_CLIENT, HaStrategyEnum.FAILOVER.name())));
 
         clientProperties.setDirectAddress(env.getProperty(DIRECT_ADDRESS_STYLE1_CLIENT, env.getProperty(DIRECT_ADDRESS_STYLE2_CLIENT)));
 
         clientProperties.setWaitTimeout(Integer.valueOf(env.getProperty(WAIT_TIMEOUT_STYLE1_CLIENT, env.getProperty(WAIT_TIMEOUT_STYLE2_CLIENT, "10000"))));
+
+        clientProperties.setPingInterval(Integer.valueOf(env.getProperty(PING_INTERVAL_STYLE1_CLIENT, env.getProperty(PING_INTERVAL_STYLE2_CLIENT, "-1"))));
 
         clientProperties.setFailOverRetry(Integer.valueOf(env.getProperty(FAILOVER_TRCRY_NUMBER_STYLE1_CLIENT, env.getProperty(FAILOVER_TRCRY_NUMBER_STYLE2_CLIENT, "3"))));
 

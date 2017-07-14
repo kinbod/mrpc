@@ -1,10 +1,9 @@
 package com.kongzhong.mrpc.springboot.client;
 
-import com.kongzhong.mrpc.Const;
 import com.kongzhong.mrpc.client.Referers;
 import com.kongzhong.mrpc.client.SimpleRpcClient;
 import com.kongzhong.mrpc.enums.RegistryEnum;
-import com.kongzhong.mrpc.interceptor.RpcClientInteceptor;
+import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
 import com.kongzhong.mrpc.model.ClientBean;
 import com.kongzhong.mrpc.registry.DefaultDiscovery;
 import com.kongzhong.mrpc.registry.ServiceDiscovery;
@@ -45,7 +44,6 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
 
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) throws BeansException {
-        log.debug("BootRpcClient postProcessBeanFactory");
 
         // 解析客户端配置
         ConfigurableEnvironment configurableEnvironment = beanFactory.getBean(ConfigurableEnvironment.class);
@@ -64,10 +62,10 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
             return;
         }
 
-        super.referers = referersObject.getReferers();
+        super.clientBeans = referersObject.getReferers();
 
         // 客户端拦截器
-        Map<String, RpcClientInteceptor> rpcClientInteceptorMap = beanFactory.getBeansOfType(RpcClientInteceptor.class);
+        Map<String, RpcClientInterceptor> rpcClientInteceptorMap = beanFactory.getBeansOfType(RpcClientInterceptor.class);
         if (null != rpcClientInteceptorMap) {
             rpcClientInteceptorMap.values().forEach(super::addInterceptor);
         }
@@ -83,6 +81,7 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
         super.retryCount = clientConfig.getRetryCount();
         super.retryInterval = clientConfig.getRetryInterval();
         super.waitTimeout = clientConfig.getWaitTimeout();
+        super.pingInterval = clientConfig.getPingInterval();
 
         // 注册中心
         if (CollectionUtils.isNotEmpty(commonProperties.getRegistry())) {
@@ -96,11 +95,11 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
         try {
             super.init();
             // 初始化客户端引用服务
-            referers.forEach(referer -> super.initReferer(referer, beanFactory));
+            clientBeans.forEach(referer -> super.initReferer(referer, beanFactory));
 
             super.directConnect();
 
-            log.info("Bind services finished, mrpc version [{}]", Const.VERSION);
+            log.info("Bind services finished");
 
         } catch (Exception e) {
             log.error("RPC client init error", e);

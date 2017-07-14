@@ -8,7 +8,22 @@ package com.kongzhong.mrpc;
  */
 public interface Const {
 
-    String VERSION = "0.0.8-SNAPSHOT";
+    String VERSION = "0.1.0-SNAPSHOT";
+
+    String BANNER = "\n" +
+            "\t\t    __  _______  ____  ______\n" +
+            "\t\t   /  |/  / __ \\/ __ \\/ ____/\n" +
+            "\t\t  / /|_/ / /_/ / /_/ / /     \n" +
+            "\t\t / /  / / _, _/ ____/ /___   \n" +
+            "\t\t/_/  /_/_/ |_/_/    \\____/   \n" +
+            "                             ";
+
+
+    String SERVER_BANNER = BANNER +
+            "\n\t　:: mrpc server :: (" + Const.VERSION + ")\n";
+
+    String CLIENT_BANNER = BANNER +
+            "\n\t　:: mrpc client :: (" + Const.VERSION + ")\n";
 
     // http头信息请求id key
     String HEADER_REQUEST_ID = "requestId";
@@ -57,6 +72,10 @@ public interface Const {
     String WAIT_TIMEOUT_STYLE1_CLIENT = "mrpc.client.wait-timeout";
     String WAIT_TIMEOUT_STYLE2_CLIENT = "mrpc.client.waitTimeout";
 
+    // 客户端定时ping服务端间隔
+    String PING_INTERVAL_STYLE1_CLIENT = "mrpc.client.pingInterval";
+    String PING_INTERVAL_STYLE2_CLIENT = "mrpc.client.ping-interval";
+
     // 客户端FailOver重试次数
     String FAILOVER_TRCRY_NUMBER_STYLE1_CLIENT = "mrpc.client.failover-retry";
     String FAILOVER_TRCRY_NUMBER_STYLE2_CLIENT = "mrpc.client.failoverRetry";
@@ -101,4 +120,5 @@ public interface Const {
     // 客户端服务发现bean前缀
     String MRPC_CLIENT_DISCOVERY_PREFIX = "mrpc-client-discovery-";
 
+    String EMPTY_SERVER = "empty_server";
 }
