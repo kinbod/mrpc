@@ -76,6 +76,12 @@ public abstract class SimpleRpcServer {
     protected String interceptors;
 
     /**
+     * 服务器权重，当用到加权轮训负载均衡策略时有用
+     */
+    @Setter
+    protected int weight;
+
+    /**
      * rpc服务地址
      */
     @Getter
@@ -247,7 +253,7 @@ public abstract class SimpleRpcServer {
                         serviceBean.setElasticIp(elasticIp);
                         serviceRegistry.register(serviceBean);
 
-                        ServiceStatusTable.me().createServiceStatus(serviceBean);
+                        ServiceStatusTable.me().createServiceStatus(serviceBean, weight);
                     } catch (RpcException e) {
                         log.error("Service register error", e);
                     }
