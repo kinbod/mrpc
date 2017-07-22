@@ -31,12 +31,11 @@ import static com.kongzhong.mrpc.Const.SERVER_INTERCEPTOR_PREFIX;
 @Slf4j
 public abstract class AbstractResponseInvoker<T> implements Callable<T> {
 
-    protected Map<String, ServiceBean>   serviceBeanMap   = null;
-    protected List<RpcServerInterceptor> interceptors     = null;
-    protected InterceptorChain           interceptorChain = new InterceptorChain();
-    protected RpcRequest                 request          = null;
-    protected RpcResponse                response         = null;
-    protected boolean                    hasInterceptors  = false;
+    private   Map<String, ServiceBean>   serviceBeanMap  = null;
+    private   List<RpcServerInterceptor> interceptors    = null;
+    private   boolean                    hasInterceptors = false;
+    protected RpcRequest                 request         = null;
+    protected RpcResponse                response        = null;
 
     public AbstractResponseInvoker(RpcRequest request, RpcResponse response, Map<String, ServiceBean> serviceBeanMap) {
         this.request = request;
@@ -47,6 +46,7 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
             hasInterceptors = true;
             int pos = interceptors.size();
             for (RpcServerInterceptor interceptor : interceptors) {
+                InterceptorChain interceptorChain = new InterceptorChain();
                 interceptorChain.addLast(SERVER_INTERCEPTOR_PREFIX + (pos--), interceptor);
             }
         }
@@ -57,16 +57,18 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
     /**
      * 执行请求的方法
      *
-     * @param request
-     * @return
-     * @throws Throwable
+     * @param request Rpc请求
+     * @return 返回执行方法后的返回值
+     * @throws Throwable 当执行服务方法出现异常时抛出
      */
     protected Object invokeMethod(RpcRequest request) throws Throwable {
+
+        RpcContext.set(new RpcContext(request));
+        String serviceName = request.getClassName();
+        String methodName  = request.getMethodName();
+        long   startTime   = System.currentTimeMillis();
+
         try {
-
-            RpcContext.set(new RpcContext(request));
-            String serviceName = request.getClassName();
-
             ServiceBean serviceBean = serviceBeanMap.get(serviceName);
             if (null == serviceBean) {
                 throw new RpcException("Not found service bean define [" + serviceName + "]");
@@ -77,11 +79,9 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
                 throw new RpcException("Not found service bean [" + serviceName + "]");
             }
 
-            Class<?>   serviceClass   = bean.getClass();
-            String     methodName     = request.getMethodName();
-            Class<?>[] parameterTypes = request.getParameterTypes();
-            Object[]   parameters     = request.getParameters();
-
+            Class<?>   serviceClass      = bean.getClass();
+            Class<?>[] parameterTypes    = request.getParameterTypes();
+            Object[]   parameters        = request.getParameters();
             FastClass  serviceFastClass  = FastClass.create(serviceClass);
             FastMethod serviceFastMethod = serviceFastClass.getMethod(methodName, parameterTypes);
 
@@ -91,11 +91,10 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
 
             //执行拦截器
             Invocation invocation = new ServerInvocation(serviceFastMethod, bean, parameters, request, interceptors);
-            Object     result     = invocation.next();
-            return result;
-        } catch (Exception e) {
-            throw e;
+            return invocation.next();
         } finally {
+            log.debug("[{}.{}]", serviceName, methodName);
+            log.debug("Request [{}] execute time: {}ms", request.getRequestId(), (System.currentTimeMillis() - startTime));
             RpcContext.remove();
         }
     }
@@ -103,9 +102,9 @@ public abstract class AbstractResponseInvoker<T> implements Callable<T> {
     /**
      * 构建一个异常响应
      *
-     * @param t
-     * @param response
-     * @return
+     * @param t        异常
+     * @param response Rpc响应
+     * @return 设置Rpc响应异常并返回当前异常
      */
     protected Throwable buildErrorResponse(Throwable t, RpcResponse response) {
         t = t instanceof InvocationTargetException ? ((InvocationTargetException) t).getTargetException() : t;
