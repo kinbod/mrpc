@@ -76,6 +76,7 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
         super.directConnect();
 
         log.info("Bind services finished.");
+        Runtime.getRuntime().addShutdownHook(new Thread( () -> this.close()));
     }
 
     /***
@@ -104,6 +105,7 @@ public class RpcSpringClient extends SimpleRpcClient implements ApplicationConte
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
         ctx = applicationContext;
+        beanFactory = ctx;
     }
 
 }

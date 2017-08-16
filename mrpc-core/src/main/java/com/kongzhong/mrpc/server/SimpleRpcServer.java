@@ -1,5 +1,6 @@
 package com.kongzhong.mrpc.server;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.util.concurrent.*;
 import com.kongzhong.mrpc.Const;
@@ -7,6 +8,8 @@ import com.kongzhong.mrpc.common.thread.RpcThreadPool;
 import com.kongzhong.mrpc.config.AdminConfig;
 import com.kongzhong.mrpc.config.NettyConfig;
 import com.kongzhong.mrpc.config.ServerConfig;
+import com.kongzhong.mrpc.embedded.ConfigService;
+import com.kongzhong.mrpc.embedded.ConfigServiceImpl;
 import com.kongzhong.mrpc.enums.EventType;
 import com.kongzhong.mrpc.enums.NodeAliveStateEnum;
 import com.kongzhong.mrpc.enums.RegistryEnum;
@@ -22,6 +25,7 @@ import com.kongzhong.mrpc.registry.ServiceRegistry;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
 import com.kongzhong.mrpc.serialize.jackson.JacksonSerialize;
 import com.kongzhong.mrpc.transport.TransferSelector;
+import com.kongzhong.mrpc.transport.netty.SimpleServerHandler;
 import com.kongzhong.mrpc.utils.*;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
@@ -34,11 +38,14 @@ import lombok.Setter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static com.kongzhong.mrpc.Const.HEADER_REQUEST_ID;
 
@@ -123,6 +130,14 @@ public abstract class SimpleRpcServer {
     @Setter
     protected String appId;
 
+    @Getter
+    @Setter
+    protected String appName;
+
+    @Getter
+    @Setter
+    protected String owner;
+
     /**
      * 是否是测试环境，如果 "true" 则在启动后不会挂起程序
      */
@@ -149,12 +164,19 @@ public abstract class SimpleRpcServer {
     @Setter
     protected AdminConfig adminConfig;
 
+    private static final Map<String, String> SERVER_CONTEXT = Maps.newHashMap();
+
     /**
      * 服务端处理线程池
      */
     private static ListeningExecutorService LISTENING_EXECUTOR_SERVICE;
 
+    private static List<ListenableFuture> listenableFutures = Lists.newCopyOnWriteArrayList();
+
     private ScheduledFuture adminSchedule;
+
+    private volatile boolean isClosed = false;
+    private          Lock    lock     = new ReentrantLock();
 
     /**
      * 启动RPC服务端
@@ -189,7 +211,13 @@ public abstract class SimpleRpcServer {
         }
 
         transferSelector = new TransferSelector(rpcSerialize);
-        LISTENING_EXECUTOR_SERVICE = MoreExecutors.listeningDecorator((ThreadPoolExecutor) RpcThreadPool.getExecutor(nettyConfig.getBusinessThreadPoolSize(), -1));
+        ServerConfig serverConfig           = ServerConfig.me();
+        int          businessThreadPoolSize = serverConfig.getBusinessThreadPoolSize();
+        setListeningExecutorService(businessThreadPoolSize);
+    }
+
+    public static void setListeningExecutorService(int businessThreadPoolSize) {
+        LISTENING_EXECUTOR_SERVICE = MoreExecutors.listeningDecorator((ThreadPoolExecutor) RpcThreadPool.getExecutor(businessThreadPoolSize, -1));
     }
 
     private void bindRpcServer() {
@@ -230,6 +258,8 @@ public abstract class SimpleRpcServer {
             ServerConfig.me().setElasticIp(elasticIp);
             ChannelFuture future = bootstrap.bind(host, port).sync();
 
+            this.registerEmbedded();
+
             //注册服务
             rpcMapping.getServiceBeanMap().values().forEach(serviceBean -> {
 
@@ -263,14 +293,12 @@ public abstract class SimpleRpcServer {
                 EventManager.me().fireEvent(EventType.SERVER_SERVICE_REGISTER, Event.builder().rpcContext(RpcContext.get()).build());
             });
 
-            if (this.usedRegistry) {
-                this.listenDestroy();
-            }
-
             log.info("Publish services finished, mrpc version [{}]", Const.VERSION);
 
             // 服务启动后
             EventManager.me().fireEvent(EventType.SERVER_STARTED, Event.builder().rpcContext(RpcContext.get()).build());
+
+            Runtime.getRuntime().addShutdownHook(new Thread( () -> this.close()));
 
             this.channelSync(future);
 
@@ -280,6 +308,21 @@ public abstract class SimpleRpcServer {
             worker.shutdownGracefully();
             boss.shutdownGracefully();
         }
+    }
+
+    /**
+     * 注册内置服务
+     */
+    private void registerEmbedded() {
+        // 注册内置服务
+        ConfigService configService     = ConfigServiceImpl.me();
+        ServiceBean   configServiceBean = new ServiceBean();
+        configServiceBean.setBean(configService);
+        configServiceBean.setServiceName(ConfigService.class.getName());
+        configServiceBean.setAppId(appId);
+        configServiceBean.setAddress(address);
+        configServiceBean.setElasticIp(elasticIp);
+        rpcMapping.addServiceBean(configServiceBean);
     }
 
     /**
@@ -436,6 +479,7 @@ public abstract class SimpleRpcServer {
 //                log.error("", t);
             }
         }, LISTENING_EXECUTOR_SERVICE);
+        listenableFutures.add(listenableFuture);
     }
 
     public static void submit(Callable<FullHttpResponse> task, final ChannelHandlerContext ctx) {
@@ -447,7 +491,6 @@ public abstract class SimpleRpcServer {
             public void onSuccess(FullHttpResponse response) {
                 // 服务端响应前
                 EventManager.me().fireEvent(EventType.SERVER_PRE_RESPONSE, Event.builder().rpcContext(RpcContext.get()).build());
-
                 //为返回msg回客户端添加一个监听器,当消息成功发送回客户端时被异步调用.
                 ctx.writeAndFlush(response).addListener((ChannelFutureListener) channelFuture ->
                         log.debug("Server send to {} success, requestId [{}]", ctx.channel(), response.headers().get(HEADER_REQUEST_ID)));
@@ -458,6 +501,7 @@ public abstract class SimpleRpcServer {
                 log.error("", t);
             }
         }, LISTENING_EXECUTOR_SERVICE);
+        listenableFutures.add(listenableFuture);
     }
 
     /**
@@ -473,19 +517,19 @@ public abstract class SimpleRpcServer {
         }
         // Zookeeper注册中心
         if (RegistryEnum.ZOOKEEPER.getName().equals(type)) {
-            String zkAddr = map.get("address");
-            if (StringUtils.isEmpty(zkAddr)) {
+            String zkAddress = map.get("address");
+            if (StringUtils.isEmpty(zkAddress)) {
                 throw new SystemException("Zookeeper connect address not is empty");
             }
-            log.info("RPC server connect zookeeper address: {}", zkAddr);
-            return this.getZookeeperServiceRegistry(zkAddr);
+            log.info("RPC server connect zookeeper address: {}", zkAddress);
+            return this.getZookeeperServiceRegistry(zkAddress);
         }
         return null;
     }
 
-    ServiceRegistry getZookeeperServiceRegistry(String zkAddr) {
+    ServiceRegistry getZookeeperServiceRegistry(String zkAddress) {
         try {
-            Object zookeeperServiceRegistry = Class.forName("com.kongzhong.mrpc.registry.ZookeeperServiceRegistry").getConstructor(String.class).newInstance(zkAddr);
+            Object zookeeperServiceRegistry = Class.forName("com.kongzhong.mrpc.registry.ZookeeperServiceRegistry").getConstructor(String.class).newInstance(zkAddress);
             return (ServiceRegistry) zookeeperServiceRegistry;
         } catch (Exception e) {
             log.error("", e);
@@ -493,20 +537,52 @@ public abstract class SimpleRpcServer {
         return null;
     }
 
+    protected static void setContext(String key, String value) {
+        SERVER_CONTEXT.put(key, value);
+    }
+
+    public static String getContext(String key) {
+        return SERVER_CONTEXT.get(key);
+    }
+
     /**
      * 销毁资源,卸载服务
      */
-    private void listenDestroy() {
-        Runtime.getRuntime().addShutdownHook(new Thread(() -> rpcMapping.getServiceBeanMap().values().forEach(serviceBean -> {
-            EventManager.me().fireEvent(EventType.SHUTDOWN_SERVER, Event.builder().rpcContext(RpcContext.get()).build());
-            String          serviceName     = serviceBean.getServiceName();
-            ServiceRegistry serviceRegistry = getRegistry(serviceBean);
-            try {
-                serviceRegistry.unRegister(serviceBean);
-                log.debug("UnRegister service => [{}]", serviceName);
-            } catch (Exception e) {
-                log.error("UnRegister service error", e);
+    public void close() {
+        lock.lock();
+        try {
+            if (isClosed) {
+                return;
             }
-        })));
+            log.info("UnRegistering mrpc server on shutdown");
+
+            // 拒绝连接
+            SimpleServerHandler.shutdown();
+
+            EventManager.me().fireEvent(EventType.SHUTDOWN_SERVER, Event.builder().rpcContext(RpcContext.get()).build());
+
+            for (ListenableFuture<FullHttpResponse> listenableFuture : listenableFutures) {
+                while (!listenableFuture.isDone()) {
+                    TimeUtils.sleep(100);
+                }
+            }
+
+            LISTENING_EXECUTOR_SERVICE.shutdown();
+            rpcMapping.getServiceBeanMap().values().forEach(serviceBean -> {
+                String          serviceName     = serviceBean.getServiceName();
+                ServiceRegistry serviceRegistry = getRegistry(serviceBean);
+                try {
+                    if (null != serviceRegistry) {
+                        serviceRegistry.unRegister(serviceBean);
+                        log.debug("UnRegister service => [{}]", serviceName);
+                    }
+                } catch (Exception e) {
+                    log.error("UnRegister service error", e);
+                }
+            });
+        } finally {
+            isClosed = true;
+            lock.unlock();
+        }
     }
 }

@@ -1,7 +1,6 @@
 package com.kongzhong.mrpc.demo.tcp;
 
 import com.kongzhong.mrpc.client.RpcSpringClient;
-import com.kongzhong.mrpc.demo.service.NoImplService;
 import com.kongzhong.mrpc.demo.service.UserService;
 
 /**

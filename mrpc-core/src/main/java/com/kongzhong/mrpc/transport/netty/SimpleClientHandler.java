@@ -7,9 +7,7 @@ import com.kongzhong.mrpc.client.RpcCallbackFuture;
 import com.kongzhong.mrpc.config.NettyConfig;
 import com.kongzhong.mrpc.exception.SerializeException;
 import com.kongzhong.mrpc.model.RpcRequest;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.util.AttributeKey;
@@ -38,6 +36,8 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
     @Setter
     protected NettyClient nettyClient;
 
+    protected static boolean isShutdown;
+
     protected LongAdder hits = new LongAdder();
 
     public static final Map<String, RpcCallbackFuture> callbackFutureMap = Maps.newConcurrentMap();
@@ -54,7 +54,7 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
 
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        log.debug("Channel actived: {}", this.channel);
+        log.debug("Channel active: {}", this.channel);
         super.channelActive(ctx);
     }
 
@@ -98,9 +98,10 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
     /**
      * 客户端关闭时调用
      */
-    public void close() {
+    public void close() throws InterruptedException {
         nettyClient.shutdown();
-        channel.writeAndFlush(Unpooled.EMPTY_BUFFER).addListener(ChannelFutureListener.CLOSE);
+        this.nettyClient.cancelSchedule(channel);
+        this.channel.close().sync();
     }
 
     public abstract RpcCallbackFuture asyncSendRequest(RpcRequest request);
@@ -130,4 +131,7 @@ public abstract class SimpleClientHandler<T> extends SimpleChannelInboundHandler
         }
     }
 
+    public static void shutdown(){
+        isShutdown = true;
+    }
 }

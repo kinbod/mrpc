@@ -1,7 +1,9 @@
 package com.kongzhong.mrpc.client.proxy;
 
 import com.google.common.reflect.AbstractInvocationHandler;
+import com.kongzhong.mrpc.Const;
 import com.kongzhong.mrpc.annotation.Command;
+import com.kongzhong.mrpc.annotation.Comment;
 import com.kongzhong.mrpc.client.LocalServiceNodeTable;
 import com.kongzhong.mrpc.client.cluster.HaStrategy;
 import com.kongzhong.mrpc.client.cluster.LoadBalance;
@@ -10,6 +12,7 @@ import com.kongzhong.mrpc.client.cluster.loadblance.LoadBalanceFactory;
 import com.kongzhong.mrpc.client.invoke.ClientInvocation;
 import com.kongzhong.mrpc.client.invoke.RpcInvoker;
 import com.kongzhong.mrpc.config.ClientConfig;
+import com.kongzhong.mrpc.embedded.ConfigServiceImpl;
 import com.kongzhong.mrpc.enums.HaStrategyEnum;
 import com.kongzhong.mrpc.enums.LbStrategyEnum;
 import com.kongzhong.mrpc.exception.RpcException;
@@ -31,7 +34,7 @@ import static com.kongzhong.mrpc.Const.CLIENT_INTERCEPTOR_PREFIX;
  * 默认的客户端代理
  *
  * @author biezhi
- *         2017/4/28
+ * 2017/4/28
  */
 @Slf4j
 public class SimpleClientProxy extends AbstractInvocationHandler {
@@ -71,6 +74,7 @@ public class SimpleClientProxy extends AbstractInvocationHandler {
 
     @Override
     protected Object handleInvocation(Object proxy, Method method, Object[] args) throws Exception {
+
         RpcRequest request = RpcRequest.builder()
                 .appId(appId)
                 .requestId(StringUtils.getUUID())
@@ -81,7 +85,11 @@ public class SimpleClientProxy extends AbstractInvocationHandler {
                 .returnType(method.getReturnType())
                 .waitTimeout(this.getWaitTimeout(method))
                 .timestamp(System.currentTimeMillis())
+                .fallbackType(this.getFallbackType(method))
+                .fallbackMethod(this.getFallbackMethod(method))
                 .build();
+
+        setContext(request, method);
 
         HaStrategy haStrategy = HighAvailableFactory.getHaStrategy(this.getHaStrategy(method));
         if (!hasInterceptors) {
@@ -121,11 +129,44 @@ public class SimpleClientProxy extends AbstractInvocationHandler {
      * @return 返回该方法的超时时长
      */
     private int getWaitTimeout(Method method) {
+        Integer timeout = ConfigServiceImpl.me().getMethodWaitTimeout(method.getName());
+        if (null != timeout) {
+            return timeout;
+        }
         Command command = method.getAnnotation(Command.class);
-        int     timeout = ClientConfig.me().getWaitTimeout();
+        timeout = ClientConfig.me().getWaitTimeout();
         if (null != command) {
             return command.waitTimeout();
         }
         return timeout;
     }
+
+    private void setContext(RpcRequest request, Method method) {
+        Comment comment = method.getDeclaringClass().getAnnotation(Comment.class);
+        if (null != comment) {
+            if (StringUtils.isNotEmpty(comment.name())) {
+                request.addContext(Const.SERVER_NAME, comment.name());
+            }
+            if (comment.owners().length > 0) {
+                request.addContext(Const.SERVER_OWNER, String.join(",", comment.owners()));
+            }
+        }
+    }
+
+    private String getFallbackType(Method method) {
+        Command command = method.getAnnotation(Command.class);
+        if (null != command && !"".equals(command.fallbackType())) {
+            return command.fallbackType();
+        }
+        return null;
+    }
+
+    private String getFallbackMethod(Method method) {
+        Command command = method.getAnnotation(Command.class);
+        if (null != command && !"".equals(command.fallbackMethod())) {
+            return command.fallbackMethod();
+        }
+        return method.getName();
+    }
+
 }

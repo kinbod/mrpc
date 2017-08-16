@@ -6,29 +6,34 @@ import com.google.common.reflect.Reflection;
 import com.kongzhong.mrpc.client.proxy.SimpleClientProxy;
 import com.kongzhong.mrpc.config.ClientConfig;
 import com.kongzhong.mrpc.config.NettyConfig;
-import com.kongzhong.mrpc.enums.HaStrategyEnum;
-import com.kongzhong.mrpc.enums.LbStrategyEnum;
-import com.kongzhong.mrpc.enums.RegistryEnum;
-import com.kongzhong.mrpc.enums.TransportEnum;
+import com.kongzhong.mrpc.enums.*;
+import com.kongzhong.mrpc.event.Event;
+import com.kongzhong.mrpc.event.EventManager;
 import com.kongzhong.mrpc.exception.RpcException;
 import com.kongzhong.mrpc.exception.SystemException;
 import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
 import com.kongzhong.mrpc.model.ClientBean;
 import com.kongzhong.mrpc.model.RegistryBean;
+import com.kongzhong.mrpc.model.RpcContext;
 import com.kongzhong.mrpc.registry.DefaultDiscovery;
 import com.kongzhong.mrpc.registry.ServiceDiscovery;
+import com.kongzhong.mrpc.registry.ServiceRegistry;
 import com.kongzhong.mrpc.serialize.RpcSerialize;
+import com.kongzhong.mrpc.transport.netty.SimpleClientHandler;
 import com.kongzhong.mrpc.utils.ReflectUtils;
 import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -36,7 +41,7 @@ import java.util.stream.Stream;
  * RPC客户端抽象实现
  *
  * @author biezhi
- *         2017/4/25
+ * 2017/4/25
  */
 @NoArgsConstructor
 @Slf4j
@@ -138,9 +143,14 @@ public abstract class SimpleRpcClient {
     /**
      * 客户端拦截器列表
      */
-    private List<RpcClientInterceptor> rpcClientInteceptors = Lists.newArrayList();
+    private List<RpcClientInterceptor> rpcClientInterceptors = Lists.newArrayList();
+
+    protected static BeanFactory beanFactory;
 
     protected NettyConfig nettyConfig;
+
+    private volatile boolean isClosed = false;
+    private          Lock    lock     = new ReentrantLock();
 
     /**
      * 获取一个Class的代理对象
@@ -150,7 +160,7 @@ public abstract class SimpleRpcClient {
      * @return 返回服务代理类
      */
     <T> T getProxyBean(Class<T> rpcInterface) {
-        return Reflection.newProxy(rpcInterface, new SimpleClientProxy(rpcClientInteceptors));
+        return Reflection.newProxy(rpcInterface, new SimpleClientProxy(rpcClientInterceptors));
     }
 
     /**
@@ -234,7 +244,7 @@ public abstract class SimpleRpcClient {
             throw new IllegalArgumentException("RpcClientInterceptor not is null");
         }
         log.info("Add interceptor [{}]", inteceptor.toString());
-        this.rpcClientInteceptors.add(inteceptor);
+        this.rpcClientInterceptors.add(inteceptor);
     }
 
     /**
@@ -310,8 +320,8 @@ public abstract class SimpleRpcClient {
         }
         try {
             if (RegistryEnum.ZOOKEEPER.getName().equals(type)) {
-                String zkAddr             = registryBean.getAddress();
-                Object zookeeperDiscovery = Class.forName("com.kongzhong.mrpc.discover.ZookeeperServiceDiscovery").getConstructor(String.class).newInstance(zkAddr);
+                String zkAddress          = registryBean.getAddress();
+                Object zookeeperDiscovery = Class.forName("com.kongzhong.mrpc.discover.ZookeeperServiceDiscovery").getConstructor(String.class).newInstance(zkAddress);
                 return (ServiceDiscovery) zookeeperDiscovery;
             }
         } catch (Exception e) {
@@ -320,12 +330,37 @@ public abstract class SimpleRpcClient {
         return null;
     }
 
+    public static <T> T getBean(Class<T> type) {
+        return beanFactory.getBean(type);
+    }
+
+    public static Object getBean(String beanName) {
+        return beanFactory.getBean(beanName);
+    }
+
     /**
      * 停止客户端，释放资源
      */
     public void shutdown() {
-//        log.info("Stop mrpc client");
-//        Connections.me().shutdown();
-//        serviceDiscoveryMap.values().forEach(serviceDiscovery -> serviceDiscovery.stop());
+        this.close();
     }
+
+    /**
+     * 停止客户端，释放资源
+     */
+    public void close() {
+        try {
+            lock.lock();
+            if (isClosed) {
+                return;
+            }
+            log.info("UnRegistering mrpc client on shutdown");
+            SimpleClientHandler.shutdown();
+            Connections.me().shutdown();
+        } finally {
+            isClosed = true;
+            lock.unlock();
+        }
+    }
+
 }
