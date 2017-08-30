@@ -23,13 +23,18 @@ public class ClientTraceInterceptor implements RpcClientInterceptor {
 
         // prepare trace context
         String traceId = Trace.getCurrentRequestId();
-        // put requestContext
-        Map<String, String> context = request.getContext();
-        context.put(TraceConstants.TRACE_ID, traceId);
 
-        log.debug("ClientTraceInterceptor [put] CurrentTraceId={}", traceId);
+        // TODO 操蛋的兼容
+        if (null != request.getContext()) {
+            // put requestContext
+            Map<String, String> context = request.getContext();
+            context.put(TraceConstants.TRACE_ID, traceId);
+            log.debug("ClientTraceInterceptor [put] CurrentTraceId={}", traceId);
+        }
 
         // invoke
-        return invoker.invoke();
+        Object invoke = invoker.invoke();
+        Trace.continueTrace(null);
+        return invoke;
     }
 }
