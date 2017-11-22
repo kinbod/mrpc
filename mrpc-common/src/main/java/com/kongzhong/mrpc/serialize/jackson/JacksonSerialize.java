@@ -2,9 +2,7 @@ package com.kongzhong.mrpc.serialize.jackson;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JavaType;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.kongzhong.mrpc.exception.SerializeException;
 import lombok.AccessLevel;
@@ -22,29 +20,25 @@ import java.util.Date;
  * JSON工具类
  *
  * @author biezhi
- *         2017/4/20
+ * 2017/4/20
  */
 @Slf4j
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 public class JacksonSerialize {
 
-    private static final ObjectMapper mapper = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     static {
-        mapper.registerModule(initModule());
-        mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        mapper.setDateFormat(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"));
-        mapper.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-    }
-
-    public static ObjectMapper getMapper() {
-        return mapper;
+        MAPPER.registerModule(initModule());
+        MAPPER.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+        MAPPER.setDateFormat(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"));
+        MAPPER.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
+        MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
     private static SimpleModule initModule() {
         return new SimpleModule().
-                addDeserializer(Date.class, new DateDeserializer()).
+                addDeserializer(Date.class, new DateDeserialize()).
                 addSerializer(LocalTime.class, new LocalTimeSerializer()).
                 addDeserializer(LocalTime.class, new LocalTimeDeserializer()).
                 addSerializer(LocalDate.class, new LocalDateSerializer()).
@@ -54,7 +48,7 @@ public class JacksonSerialize {
     }
 
     public static JavaType getJavaType(Type type) {
-        return mapper.getTypeFactory().constructType(type);
+        return MAPPER.getTypeFactory().constructType(type);
     }
 
     /**
@@ -65,7 +59,7 @@ public class JacksonSerialize {
      */
     public static String toJSONString(Object object) {
         try {
-            return mapper.writeValueAsString(object);
+            return MAPPER.writeValueAsString(object);
         } catch (Exception e) {
             log.error("Object to json stirng error", e);
             return null;
@@ -77,7 +71,7 @@ public class JacksonSerialize {
             return toJSONString(object);
         }
         try {
-            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(object);
+            return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(object);
         } catch (Exception e) {
             log.error("Object to json stirng error", e);
             return null;
@@ -94,7 +88,7 @@ public class JacksonSerialize {
      */
     public static <T> T parseObject(String json, Class<T> type) throws SerializeException {
         try {
-            return mapper.readValue(json, type);
+            return MAPPER.readValue(json, type);
         } catch (Exception e) {
             log.error("Json parse to object error", e);
             throw new SerializeException(e);
@@ -106,7 +100,7 @@ public class JacksonSerialize {
      */
     public static <T> T parseObject(String json, Type type) {
         try {
-            return mapper.readValue(json, getJavaType(type));
+            return MAPPER.readValue(json, getJavaType(type));
         } catch (Exception e) {
             log.error("Json parse to object error", e);
         }
@@ -115,7 +109,7 @@ public class JacksonSerialize {
 
     public static <T> T parseObject(String json, TypeReference<T> typeReference) {
         try {
-            return mapper.readValue(json, typeReference);
+            return MAPPER.readValue(json, typeReference);
         } catch (Exception e) {
             log.error("Json parse to object error", e);
             return null;
