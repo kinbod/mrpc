@@ -61,6 +61,13 @@ public class LocalServiceNodeTable {
                 .collect(Collectors.toSet());
     }
 
+    public static Set<String> getAliveAddress() {
+        return SERVICE_NODES.stream()
+                .filter(node -> node.getAliveState() == NodeAliveStateEnum.ALIVE)
+                .map(ServiceNode::getServerAddress)
+                .collect(Collectors.toSet());
+    }
+
     /**
      * 获取所有挂掉的服务
      *
@@ -230,7 +237,7 @@ public class LocalServiceNodeTable {
      * @param serverAddress 服务地址
      */
     static void updateServiceNode(String serviceName, String serverAddress) {
-        Set<String> serviceNodes = SERVICE_MAPPINGS.getOrDefault(serviceName, new HashSet<>());
+        Set<String> serviceNodes = SERVICE_MAPPINGS.getOrDefault(serviceName, Sets.newConcurrentHashSet());
         serviceNodes.add(serverAddress);
         SERVICE_MAPPINGS.put(serviceName, serviceNodes);
 

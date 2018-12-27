@@ -2,15 +2,18 @@ package com.kongzhong.mrpc.serialize.jackson;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.kongzhong.mrpc.exception.SerializeException;
+import com.kongzhong.mrpc.exception.SystemException;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.zapodot.jackson.java8.JavaOptionalModule;
 
 import java.lang.reflect.Type;
-import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -30,8 +33,8 @@ public class JacksonSerialize {
 
     static {
         MAPPER.registerModule(initModule());
+        MAPPER.registerModule(new JavaOptionalModule());
         MAPPER.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        MAPPER.setDateFormat(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss"));
         MAPPER.enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
         MAPPER.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
@@ -57,24 +60,22 @@ public class JacksonSerialize {
      * @param object
      * @return
      */
-    public static String toJSONString(Object object) {
+    public static String toJSONString(Object object) throws SerializeException {
         try {
             return MAPPER.writeValueAsString(object);
         } catch (Exception e) {
-            log.error("Object to json stirng error", e);
-            return null;
+            throw new SerializeException(e);
         }
     }
 
-    public static String toJSONString(Object object, boolean pretty) {
+    public static String toJSONString(Object object, boolean pretty) throws SerializeException {
         if (!pretty) {
             return toJSONString(object);
         }
         try {
             return MAPPER.writerWithDefaultPrettyPrinter().writeValueAsString(object);
         } catch (Exception e) {
-            log.error("Object to json stirng error", e);
-            return null;
+            throw new SerializeException(e);
         }
     }
 
@@ -115,4 +116,5 @@ public class JacksonSerialize {
             return null;
         }
     }
+
 }

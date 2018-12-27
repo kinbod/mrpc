@@ -4,22 +4,27 @@ import com.kongzhong.mrpc.client.Referers;
 import com.kongzhong.mrpc.client.SimpleRpcClient;
 import com.kongzhong.mrpc.enums.RegistryEnum;
 import com.kongzhong.mrpc.interceptor.RpcClientInterceptor;
+import com.kongzhong.mrpc.interceptor.RpcServerInterceptor;
 import com.kongzhong.mrpc.model.ClientBean;
 import com.kongzhong.mrpc.registry.DefaultDiscovery;
 import com.kongzhong.mrpc.registry.ServiceDiscovery;
+import com.kongzhong.mrpc.spring.utils.AopTargetUtils;
 import com.kongzhong.mrpc.springboot.config.CommonProperties;
 import com.kongzhong.mrpc.springboot.config.RpcClientProperties;
 import com.kongzhong.mrpc.utils.CollectionUtils;
+import com.kongzhong.mrpc.utils.ReflectUtils;
 import com.kongzhong.mrpc.utils.StringUtils;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeansException;
+import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.beans.factory.support.BeanDefinitionRegistry;
 import org.springframework.beans.factory.support.BeanDefinitionRegistryPostProcessor;
 import org.springframework.core.env.ConfigurableEnvironment;
 
 import java.util.Map;
+import java.util.Objects;
 
 import static com.kongzhong.mrpc.Const.MRPC_CLIENT_DISCOVERY_PREFIX;
 
@@ -31,7 +36,7 @@ import static com.kongzhong.mrpc.Const.MRPC_CLIENT_DISCOVERY_PREFIX;
  */
 @Slf4j
 @NoArgsConstructor
-public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegistryPostProcessor {
+public class BootRpcClient extends SimpleRpcClient implements BeanPostProcessor, BeanDefinitionRegistryPostProcessor {
 
     /**
      * 自定义引用配置
@@ -73,14 +78,14 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
         // 客户端拦截器
         Map<String, RpcClientInterceptor> rpcClientInterceptorMap = beanFactory.getBeansOfType(RpcClientInterceptor.class);
         if (null != rpcClientInterceptorMap) {
-            rpcClientInterceptorMap.values().forEach(super::addInterceptor);
+            rpcClientInterceptorMap.values().stream()
+                    .filter(Objects::nonNull).forEach(super::addInterceptor);
         }
 
         this.customServiceMap = commonProperties.getCustom();
         super.nettyConfig = commonProperties.getNetty();
 
         super.appId = clientConfig.getAppId();
-        super.transport = clientConfig.getTransport();
         super.lbStrategy = clientConfig.getLbStrategy();
         super.haStrategy = clientConfig.getHaStrategy();
         super.serialize = clientConfig.getSerialize();
@@ -168,4 +173,24 @@ public class BootRpcClient extends SimpleRpcClient implements BeanDefinitionRegi
         super.close();
     }
 
+    @Override
+    public Object postProcessBeforeInitialization(Object o, String s) throws BeansException {
+        return o;
+    }
+
+    @Override
+    public Object postProcessAfterInitialization(Object bean, String s) throws BeansException {
+//        Object realBean = null;
+//        try {
+//            realBean = AopTargetUtils.getTarget(bean);
+//        } catch (Exception e) {
+//            log.error("Get bean target error", e);
+//        }
+//        Class<?> service = realBean.getClass();
+//        boolean hasInterface = ReflectUtils.hasInterface(service, RpcClientInterceptor.class);
+//        if (hasInterface) {
+//            super.addInterceptor((RpcClientInterceptor) realBean);
+//        }
+        return bean;
+    }
 }
